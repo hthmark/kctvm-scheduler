@@ -1,0 +1,77 @@
+const express = require('express');
+const router = express.Router();
+const { createClient } = require('@supabase/supabase-js');
+const { handleTechReply, handleCustomerTimeReply, handleJobCompletion } = require('./service-orchestrator');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+function parseInbound(req) {
+  const provider = process.env.SMS_PROVIDER;
+  if (provider === 'twilio') {
+    return { from: req.body.From, body: (req.body.Body || '').trim() };
+  }
+  if (provider === 'telnyx') {
+    const data = req.body?.data?.payload;
+    return { from: data?.from?.phone_number, body: (data?.text || '').trim() };
+  }
+  return { from: null, body: null };
+}
+
+router.post('/inbound', async (req, res) => {
+  res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  try {
+    const { from, body } = parseInbound(req);
+    if (!from || !body) return;
+    const normalizedFrom = from.replace(/\D/g, '');
+    const bodyLower = body.toLowerCase().trim();
+    console.log(`[SMS Inbound] From: ${from} | Body: "${body}"`);
+
+    const { data: tech } = await supabase
+      .from('technicians').select('id, name')
+      .or(`phone.eq.${from},phone.eq.+1${normalizedFrom}`).single();
+
+    if (tech) {
+      const { data: job } = await supabase
+        .from('jobs').select('id, status, current_tech_id')
+        .eq('current_tech_id', tech.id).eq('status', 'awaiting_tech_reply').single();
+
+      if (job) {
+        if (bodyLower === 'yes' || bodyLower === 'y') {
+          await handleTechReply(job.id, tech.id, 'yes');
+        } else if (bodyLower === 'no' || bodyLower === 'n') {
+          await handleTechReply(job.id, tech.id, 'no');
+        } else {
+          const { sendSMS } = require('./service-sms');
+          await sendSMS(from, `Please reply "Yes" if available or "No" if not. Thanks!`);
+        }
+        return;
+      }
+
+      const { data: activeJob } = await supabase
+        .from('jobs').select('id')
+        .eq('confirmed_tech_id', tech.id).eq('status', 'confirmed').single();
+
+      if (activeJob && (bodyLower.includes('done') || bodyLower.includes('complete') || bodyLower.includes('finished'))) {
+        await handleJobCompletion(activeJob.id);
+        return;
+      }
+    }
+
+    const { data: jobs } = await supabase
+      .from('jobs').select('*')
+      .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+      .in('status', ['awaiting_time_confirm', 'scheduling_conflict'])
+      .order('created_at', { ascending: false }).limit(1);
+
+    if (jobs && jobs.length > 0) {
+      await handleCustomerTimeReply(jobs[0], body);
+    }
+  } catch (err) {
+    console.error('[SMS Inbound] Error:', err);
+  }
+});
+
+module.exports = router;
