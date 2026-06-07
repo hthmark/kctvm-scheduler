@@ -14,21 +14,23 @@ router.get('/', async (req, res) => {
   if (status) query = query.eq('status', status);
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json(data || []);
 });
 
 router.get('/stats/summary', async (req, res) => {
-  const { data: jobs } = await supabase.from('jobs').select('status, total_price, created_at');
+  const { data: jobs, error } = await supabase.from('jobs').select('status, total_price, created_at');
+  if (error) return res.status(500).json({ error: error.message });
+  const j = jobs || [];
   const today = new Date().toISOString().split('T')[0];
   const summary = {
-    total: jobs.length,
-    today: jobs.filter(j => j.created_at.startsWith(today)).length,
-    awaiting_tech: jobs.filter(j => j.status === 'awaiting_tech_reply').length,
-    awaiting_payment: jobs.filter(j => j.status === 'awaiting_payment').length,
-    confirmed: jobs.filter(j => j.status === 'confirmed').length,
-    completed: jobs.filter(j => j.status === 'completed').length,
-    cancelled: jobs.filter(j => j.status === 'cancelled').length,
-    revenue_total: jobs.filter(j => j.status === 'completed').reduce((sum, j) => sum + (j.total_price || 0), 0),
+    total: j.length,
+    today: j.filter(x => x.created_at.startsWith(today)).length,
+    awaiting_tech: j.filter(x => x.status === 'awaiting_tech_reply').length,
+    awaiting_payment: j.filter(x => x.status === 'awaiting_payment').length,
+    confirmed: j.filter(x => x.status === 'confirmed').length,
+    completed: j.filter(x => x.status === 'completed').length,
+    cancelled: j.filter(x => x.status === 'cancelled').length,
+    revenue_total: j.filter(x => x.status === 'completed').reduce((sum, x) => sum + (x.total_price || 0), 0),
   };
   res.json(summary);
 });
@@ -36,7 +38,7 @@ router.get('/stats/summary', async (req, res) => {
 router.get('/techs/list', async (req, res) => {
   const { data, error } = await supabase.from('technicians').select('*').order('priority', { ascending: true });
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json(data || []);
 });
 
 router.post('/techs/add', async (req, res) => {
