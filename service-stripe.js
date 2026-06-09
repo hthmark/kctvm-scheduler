@@ -2,14 +2,17 @@ const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 async function createPaymentLink(job) {
+  // Create product first, then price
+  const product = await stripe.products.create({
+    name: `TV Mounting — ${job.num_tvs} TV${job.num_tvs > 1 ? 's' : ''} in ${job.city}`,
+  });
+
   const price = await stripe.prices.create({
     currency: 'usd',
     unit_amount: Math.round(job.total_price * 100),
-    product_data: {
-      name: `TV Mounting — ${job.num_tvs} TV${job.num_tvs > 1 ? 's' : ''} in ${job.city}`,
-      description: `Scheduled: ${job.preferred_time}`,
-    },
+    product: product.id,
   });
+
   const paymentLink = await stripe.paymentLinks.create({
     line_items: [{ price: price.id, quantity: 1 }],
     metadata: { job_id: job.id },
@@ -17,13 +20,16 @@ async function createPaymentLink(job) {
       type: 'redirect',
       redirect: { url: `${process.env.BASE_URL}/payment-success?job_id=${job.id}` },
     },
-    custom_fields: [{
-      key: 'full_address',
-      label: { type: 'custom', custom: 'Full installation address' },
-      type: 'text',
-      optional: false,
-    }],
+    custom_fields: [
+      {
+        key: 'full_address',
+        label: { type: 'custom', custom: 'Full installation address' },
+        type: 'text',
+        optional: false,
+      },
+    ],
   });
+
   console.log(`[Stripe] Payment link created for job ${job.id}: ${paymentLink.url}`);
   return paymentLink.url;
 }
