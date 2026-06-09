@@ -2,7 +2,6 @@ const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
 async function createPaymentLink(job) {
-  // Create product first, then price
   const product = await stripe.products.create({
     name: `TV Mounting — ${job.num_tvs} TV${job.num_tvs > 1 ? 's' : ''} in ${job.city}`,
   });
