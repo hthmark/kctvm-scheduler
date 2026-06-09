@@ -128,23 +128,30 @@ async function checkPaymentReminder(jobId, stage) {
 async function handlePaymentComplete(job, address) {
   await updateJob(job.id, { status: 'confirmed', customer_address: address, paid_at: new Date().toISOString() });
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
+
+  // Build human-readable TV details
   const tvDetails = [];
   for (let i = 1; i <= 10; i++) {
     const size = job[`tv_${i}_size`];
     if (!size || size === 'null') continue;
-    tvDetails.push(`TV${i}: ${size}, mount=${job[`tv_${i}_mount`]}, wall=${job[`tv_${i}_wall`]}, wire=${job[`tv_${i}_wire`]}`);
+    const sizeLabel = size === 'small' ? 'under 65"' : '65" or larger';
+    const mount = job[`tv_${i}_mount`];
+    const mountLabel = mount === 'yes' ? 'has mount' : mount === 'fixed' ? 'fixed mount needed' : mount === 'articulating' ? 'articulating mount needed' : mount;
+    const wallLabel = job[`tv_${i}_wall`] === 'brick' ? 'brick wall' : 'drywall';
+    const wireLabel = job[`tv_${i}_wire`] === 'cable' ? 'wire concealment' : 'no wire concealment';
+    tvDetails.push(`TV${i}: ${sizeLabel}, ${mountLabel}, ${wallLabel}, ${wireLabel}`);
   }
-  // Tech gets full job details — reply "Done" when complete to trigger review request
-  await sendSMS(tech.phone, `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n${tvDetails.join('\n')}\nPlease send photos + receipts and reply "Done" when the job is complete. Thanks ${tech.name.split(' ')[0]}!`);
+
+  await sendSMS(tech.phone, `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n${tvDetails.join('\n')}\nSend photos + receipts and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`);
   await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]}! Payment received. ${tech.name.split(' ')[0]} will be there at ${job.preferred_time}. See you then!`);
+  console.log(`[Orchestrator] Job ${job.id} confirmed — tech and customer notified`);
 }
 
 async function handleJobCompletion(jobId) {
   const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
   await updateJob(jobId, { status: 'completed', completed_at: new Date().toISOString() });
-  // Send review request to customer
   await sendSMS(job.customer_phone, `Thank you for choosing Kansas City TV Mounting, ${job.customer_name.split(' ')[0]}! We hope everything looks great. We'd love a quick Google review if you have a moment: ${GOOGLE_REVIEW_URL}`);
-  console.log(`[Orchestrator] Job ${jobId} completed — review request sent`);
+  console.log(`[Orchestrator] Job ${jobId} completed — review request sent to customer`);
 }
 
 async function cancelJob(jobId, reason) {
