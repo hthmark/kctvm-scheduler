@@ -27,10 +27,11 @@ router.post('/quote', async (req, res) => {
       updated_at: new Date().toISOString(),
     };
     for (let i = 1; i <= 10; i++) {
-      jobData[`tv_${i}_size`] = payload[`tv_${i}_size`] || null;
-      jobData[`tv_${i}_mount`] = payload[`tv_${i}_mount`] || null;
-      jobData[`tv_${i}_wall`] = payload[`tv_${i}_wall`] || null;
-      jobData[`tv_${i}_wire`] = payload[`tv_${i}_wire`] || null;
+      jobData[`tv_${i}_size`]   = payload[`tv_${i}_size`]   || null;
+      jobData[`tv_${i}_inches`] = payload[`tv_${i}_inches`] ? parseInt(payload[`tv_${i}_inches`]) : null;
+      jobData[`tv_${i}_mount`]  = payload[`tv_${i}_mount`]  || null;
+      jobData[`tv_${i}_wall`]   = payload[`tv_${i}_wall`]   || null;
+      jobData[`tv_${i}_wire`]   = payload[`tv_${i}_wire`]   || null;
     }
     const { data: job, error } = await supabase
       .from('jobs').insert(jobData).select().single();
