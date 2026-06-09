@@ -6,6 +6,7 @@ const { createPaymentLink, checkPaymentStatus } = require('./service-stripe');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const TECH_TIMEOUT_MS = (parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 30) * 60 * 1000;
+const GOOGLE_REVIEW_URL = 'https://g.page/r/CWmvZghawMfzEBM/review';
 
 async function updateJob(jobId, updates) {
   const { error } = await supabase.from('jobs')
@@ -133,14 +134,17 @@ async function handlePaymentComplete(job, address) {
     if (!size || size === 'null') continue;
     tvDetails.push(`TV${i}: ${size}, mount=${job[`tv_${i}_mount`]}, wall=${job[`tv_${i}_wall`]}, wire=${job[`tv_${i}_wire`]}`);
   }
-  await sendSMS(tech.phone, `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n${tvDetails.join('\n')}\nPlease send photos upon completion + any supply receipts. Thanks ${tech.name.split(' ')[0]}!`);
+  // Tech gets full job details — reply "Done" when complete to trigger review request
+  await sendSMS(tech.phone, `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n${tvDetails.join('\n')}\nPlease send photos + receipts and reply "Done" when the job is complete. Thanks ${tech.name.split(' ')[0]}!`);
   await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]}! Payment received. ${tech.name.split(' ')[0]} will be there at ${job.preferred_time}. See you then!`);
 }
 
 async function handleJobCompletion(jobId) {
   const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
   await updateJob(jobId, { status: 'completed', completed_at: new Date().toISOString() });
-  await sendSMS(job.customer_phone, `Thank you for choosing Kansas City TV Mounting, ${job.customer_name.split(' ')[0]}! We'd love a Google review if you have a moment: https://g.page/r/YOUR_GOOGLE_REVIEW_LINK/review`);
+  // Send review request to customer
+  await sendSMS(job.customer_phone, `Thank you for choosing Kansas City TV Mounting, ${job.customer_name.split(' ')[0]}! We hope everything looks great. We'd love a quick Google review if you have a moment: ${GOOGLE_REVIEW_URL}`);
+  console.log(`[Orchestrator] Job ${jobId} completed — review request sent`);
 }
 
 async function cancelJob(jobId, reason) {
