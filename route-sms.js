@@ -29,20 +29,24 @@ router.post('/inbound', async (req, res) => {
     const bodyLower = body.toLowerCase().trim();
     console.log(`[SMS Inbound] From: ${from} | Body: "${body}"`);
 
+    // Check if sender is a tech
     const { data: tech } = await supabase
       .from('technicians').select('id, name')
       .or(`phone.eq.${from},phone.eq.+1${normalizedFrom}`).single();
 
     if (tech) {
-      const { data: job } = await supabase
+      // Check if tech has a job awaiting their reply
+      const { data: pendingJob } = await supabase
         .from('jobs').select('id, status, current_tech_id')
-        .eq('current_tech_id', tech.id).eq('status', 'awaiting_tech_reply').single();
+        .eq('current_tech_id', tech.id)
+        .eq('status', 'awaiting_tech_reply')
+        .single();
 
-      if (job) {
+      if (pendingJob) {
         if (bodyLower === 'yes' || bodyLower === 'y') {
-          await handleTechReply(job.id, tech.id, 'yes');
+          await handleTechReply(pendingJob.id, tech.id, 'yes');
         } else if (bodyLower === 'no' || bodyLower === 'n') {
-          await handleTechReply(job.id, tech.id, 'no');
+          await handleTechReply(pendingJob.id, tech.id, 'no');
         } else {
           const { sendSMS } = require('./service-sms');
           await sendSMS(from, `Please reply "Yes" if available or "No" if not. Thanks!`);
@@ -50,25 +54,35 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
-      const { data: activeJob } = await supabase
-        .from('jobs').select('id')
-        .eq('confirmed_tech_id', tech.id).eq('status', 'confirmed').single();
+      // Check if tech is replying "Done" on a confirmed job
+      if (bodyLower === 'done' || bodyLower.includes('done') || bodyLower.includes('complete') || bodyLower.includes('finished')) {
+        const { data: confirmedJob } = await supabase
+          .from('jobs').select('id')
+          .eq('confirmed_tech_id', tech.id)
+          .eq('status', 'confirmed')
+          .single();
 
-      if (activeJob && (bodyLower.includes('done') || bodyLower.includes('complete') || bodyLower.includes('finished'))) {
-        await handleJobCompletion(activeJob.id);
-        return;
+        if (confirmedJob) {
+          await handleJobCompletion(confirmedJob.id);
+          const { sendSMS } = require('./service-sms');
+          await sendSMS(from, `Great work! Job marked complete and review request sent to the customer. 🎉`);
+          return;
+        }
       }
     }
 
+    // Check if sender is a customer waiting for time confirmation
     const { data: jobs } = await supabase
       .from('jobs').select('*')
       .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
       .in('status', ['awaiting_time_confirm', 'scheduling_conflict'])
-      .order('created_at', { ascending: false }).limit(1);
+      .order('created_at', { ascending: false })
+      .limit(1);
 
     if (jobs && jobs.length > 0) {
       await handleCustomerTimeReply(jobs[0], body);
     }
+
   } catch (err) {
     console.error('[SMS Inbound] Error:', err);
   }
