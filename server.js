@@ -19,6 +19,10 @@ app.use('/jobs', require('./route-jobs'));
 
 app.get('/', (req, res) => res.json({ status: 'KCTVM Scheduler running' }));
 
+app.get('/payment-success', (req, res) => {
+  res.send('<html><body style="font-family:sans-serif;text-align:center;padding:60px"><h1>✅ Payment received!</h1><p>Your TV mounting appointment is confirmed. You\'ll receive a text shortly with your booking details.</p></body></html>');
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
