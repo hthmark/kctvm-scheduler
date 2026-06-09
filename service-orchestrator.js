@@ -8,6 +8,107 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 const TECH_TIMEOUT_MS = (parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 30) * 60 * 1000;
 const GOOGLE_REVIEW_URL = 'https://g.page/r/CWmvZghawMfzEBM/review';
 
+// ─── WALMART MOUNT LINKS ──────────────────────────────────────────────────────
+const MOUNT_LINKS = {
+  fixed: {
+    small: {
+      label: 'ONN Fixed Mount 32"-86"',
+      url: 'https://www.walmart.com/ip/777842123'
+    },
+    large: {
+      label: 'ONN Fixed Mount 80"-110"',
+      url: 'https://www.walmart.com/ip/ONNFIXED-MNT-80-110/13343901384'
+    }
+  },
+  articulating: {
+    small_low: {
+      label: 'ONN Full Motion Mount 32"-47"',
+      url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-TVs-32-to-47/593012224'
+    },
+    small_high: {
+      label: 'ONN Full Motion Mount 47"-70"',
+      url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-47-to-70-TVs-Black/384156891'
+    },
+    large: {
+      label: 'ONN Full Motion Mount 50"-86"',
+      url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-50-to-86-TVs-up-to-15-Tilting/866844895'
+    }
+  }
+};
+
+// ─── HOME DEPOT WIRE CONCEAL LINKS ───────────────────────────────────────────
+const WIRE_CONCEAL_LINKS = [
+  { label: 'Brush Plate (1 per TV)', url: 'https://www.homedepot.com/p/Commercial-Electric-1-Gang-Brush-Plastic-Wall-Plate-White-5038-WH/207161871' },
+  { label: 'Single Gang Box (1 per TV)', url: 'https://www.homedepot.com/p/Carlon-1-Gang-Non-Metallic-Low-Voltage-Old-Work-Bracket-SC100RR-SC100RR/100160916' }
+];
+
+/**
+ * Determine the correct mount link for a TV
+ * Returns { label, url } or null if mount not needed or out of range
+ */
+function getMountInfo(mountType, tvSize, tvInches) {
+  if (mountType === 'yes' || mountType === 'no' || !mountType) return null;
+  const inches = tvInches || (tvSize === 'large' ? 70 : 52);
+
+  if (mountType === 'fixed') {
+    // Fixed: under 80" use 32-86 mount, 80"+ use 80-110 mount
+    if (inches >= 80) return MOUNT_LINKS.fixed.large;
+    if (inches <= 86) return MOUNT_LINKS.fixed.small;
+    return null; // out of range
+  }
+
+  if (mountType === 'articulating') {
+    if (inches <= 47) return MOUNT_LINKS.articulating.small_low;   // 32"-47"
+    if (inches <= 70) return MOUNT_LINKS.articulating.small_high;  // 47"-70"
+    if (inches <= 86) return MOUNT_LINKS.articulating.large;       // 70"-86"
+    return null; // out of range — 87"+ needs custom
+  }
+
+  return null;
+}
+
+/**
+ * Build full supply list for a job — mounts, wire concealment, brick notes
+ * Returns { mountItems, wireItems, brickTVs, outOfRangeTVs }
+ */
+function buildSupplyList(job) {
+  const mountItems = [];
+  const wireItems = [];
+  const brickTVs = [];
+  const outOfRangeTVs = [];
+
+  for (let i = 1; i <= 10; i++) {
+    const size = job[`tv_${i}_size`];
+    if (!size || size === 'null' || size === 'undefined') continue;
+
+    const mount = job[`tv_${i}_mount`];
+    const wall = job[`tv_${i}_wall`];
+    const wire = job[`tv_${i}_wire`];
+
+    // Mount needed
+    if (mount === 'fixed' || mount === 'articulating') {
+      const mountInfo = getMountInfo(mount, size, job[`tv_${i}_inches`]);
+      if (mountInfo) {
+        mountItems.push({ tvNum: i, type: mount, size, ...mountInfo });
+      } else {
+        outOfRangeTVs.push({ tvNum: i, mount, size });
+      }
+    }
+
+    // Wire concealment needed
+    if (wire === 'cable') {
+      wireItems.push({ tvNum: i });
+    }
+
+    // Brick wall
+    if (wall === 'brick') {
+      brickTVs.push({ tvNum: i });
+    }
+  }
+
+  return { mountItems, wireItems, brickTVs, outOfRangeTVs };
+}
+
 async function updateJob(jobId, updates) {
   const { error } = await supabase.from('jobs')
     .update({ ...updates, updated_at: new Date().toISOString() }).eq('id', jobId);
@@ -23,6 +124,16 @@ async function processNewJob(job) {
     if (available) {
       const eventId = await createJobEvent(job, preferredDate);
       await updateJob(job.id, { status: 'tech_search', scheduled_time: preferredDate.toISOString(), calendar_event_id: eventId, tech_search_index: 0 });
+
+      // Check for out-of-range TVs before dispatching
+      const { outOfRangeTVs } = buildSupplyList(job);
+      if (outOfRangeTVs.length > 0) {
+        const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum}`).join(', ');
+        await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. For ${tvNums}, we'll need to order a custom mount online which takes about 2 days. Would it work to push your appointment back 2 days to ${job.preferred_time} + 2 days? Just reply Yes to confirm or suggest another time.`);
+        await updateJob(job.id, { status: 'awaiting_time_confirm' });
+        return;
+      }
+
       await dispatchToNextTech(job.id);
     } else {
       await updateJob(job.id, { status: 'scheduling_conflict' });
@@ -87,7 +198,7 @@ async function techAccepted(job, techId) {
   if (job.calendar_event_id) await confirmJobEvent(job.calendar_event_id, tech.name);
   const paymentUrl = await createPaymentLink(job);
   await updateJob(job.id, { status: 'awaiting_payment', confirmed_tech_id: techId, confirmed_tech_name: tech.name, stripe_payment_link: paymentUrl, payment_link_sent_at: new Date().toISOString() });
-  await sendSMS(tech.phone, `Great, you're confirmed for the job in ${job.city} at ${job.preferred_time}! We'll send you the full address once the customer pays. Thanks ${tech.name.split(' ')[0]}!`);
+  await sendSMS(tech.phone, `Great, you're confirmed for the job in ${job.city} at ${job.preferred_time}! We'll send you the full address and supply list once the customer pays. Thanks ${tech.name.split(' ')[0]}!`);
   await sendSMS(job.customer_phone, `Great news, ${job.customer_name.split(' ')[0]}! Your TV mounting is confirmed for ${job.preferred_time} with ${tech.name.split(' ')[0]}. Please complete payment and provide your full installation address here: ${paymentUrl}`);
   setTimeout(() => checkPaymentReminder(job.id, '2hr'), 2 * 60 * 60 * 1000);
 }
@@ -129,20 +240,46 @@ async function handlePaymentComplete(job, address) {
   await updateJob(job.id, { status: 'confirmed', customer_address: address, paid_at: new Date().toISOString() });
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
 
-  // Build human-readable TV details
-  const tvDetails = [];
+  const { mountItems, wireItems, brickTVs } = buildSupplyList(job);
+
+  // Build human-readable TV summary
+  const tvLines = [];
   for (let i = 1; i <= 10; i++) {
     const size = job[`tv_${i}_size`];
     if (!size || size === 'null') continue;
     const sizeLabel = size === 'small' ? 'under 65"' : '65" or larger';
     const mount = job[`tv_${i}_mount`];
     const mountLabel = mount === 'yes' ? 'has mount' : mount === 'fixed' ? 'fixed mount needed' : mount === 'articulating' ? 'articulating mount needed' : mount;
-    const wallLabel = job[`tv_${i}_wall`] === 'brick' ? 'brick wall' : 'drywall';
+    const wallLabel = job[`tv_${i}_wall`] === 'brick' ? 'BRICK WALL' : 'drywall';
     const wireLabel = job[`tv_${i}_wire`] === 'cable' ? 'wire concealment' : 'no wire concealment';
-    tvDetails.push(`TV${i}: ${sizeLabel}, ${mountLabel}, ${wallLabel}, ${wireLabel}`);
+    tvLines.push(`TV${i}: ${sizeLabel}, ${mountLabel}, ${wallLabel}, ${wireLabel}`);
   }
 
-  await sendSMS(tech.phone, `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n${tvDetails.join('\n')}\nSend photos + receipts and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`);
+  // Build supply section
+  let supplySection = '';
+
+  if (mountItems.length > 0) {
+    supplySection += `\n\n🛒 PICK UP MOUNTS FROM WALMART:`;
+    mountItems.forEach(m => {
+      supplySection += `\nTV${m.tvNum} — ${m.label}: ${m.url}`;
+    });
+  }
+
+  if (wireItems.length > 0) {
+    supplySection += `\n\n🛒 PICK UP WIRE CONCEAL SUPPLIES (${wireItems.length}x each) FROM HOME DEPOT:`;
+    WIRE_CONCEAL_LINKS.forEach(item => {
+      supplySection += `\n${item.label}: ${item.url}`;
+    });
+  }
+
+  if (brickTVs.length > 0) {
+    const brickNums = brickTVs.map(t => `TV${t.tvNum}`).join(', ');
+    supplySection += `\n\n🧱 BRICK WALL — ${brickNums}: Bring masonry drill bits and appropriate anchors!`;
+  }
+
+  const techMsg = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n\n${tvLines.join('\n')}${supplySection}\n\nSend photos + receipts and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
+
+  await sendSMS(tech.phone, techMsg);
   await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]}! Payment received. ${tech.name.split(' ')[0]} will be there at ${job.preferred_time}. See you then!`);
   console.log(`[Orchestrator] Job ${job.id} confirmed — tech and customer notified`);
 }
