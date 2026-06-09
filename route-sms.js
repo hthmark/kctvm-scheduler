@@ -35,6 +35,8 @@ router.post('/inbound', async (req, res) => {
       .or(`phone.eq.${from},phone.eq.+1${normalizedFrom}`).single();
 
     if (tech) {
+      console.log(`[SMS Inbound] Tech found: ${tech.name}, body: "${bodyLower}"`);
+
       // Check if tech has a job awaiting their reply
       const { data: pendingJob } = await supabase
         .from('jobs').select('id, status, current_tech_id')
@@ -54,8 +56,9 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
-      // Check if tech is replying "Done" on a confirmed job
-      if (bodyLower === 'done' || bodyLower.includes('done') || bodyLower.includes('complete') || bodyLower.includes('finished')) {
+      // Always check for Done regardless of pending jobs
+      if (bodyLower === 'done' || bodyLower === 'complete' || bodyLower === 'finished') {
+        console.log(`[SMS Inbound] Tech ${tech.name} replied Done — looking for confirmed job`);
         const { data: confirmedJob } = await supabase
           .from('jobs').select('id')
           .eq('confirmed_tech_id', tech.id)
@@ -63,10 +66,13 @@ router.post('/inbound', async (req, res) => {
           .single();
 
         if (confirmedJob) {
+          console.log(`[SMS Inbound] Found confirmed job ${confirmedJob.id} — marking complete`);
           await handleJobCompletion(confirmedJob.id);
           const { sendSMS } = require('./service-sms');
           await sendSMS(from, `Great work! Job marked complete and review request sent to the customer. 🎉`);
           return;
+        } else {
+          console.log(`[SMS Inbound] No confirmed job found for tech ${tech.name}`);
         }
       }
     }
