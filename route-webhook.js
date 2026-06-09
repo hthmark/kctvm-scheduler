@@ -17,7 +17,7 @@ router.post('/quote', async (req, res) => {
     }
     const jobData = {
       customer_name: payload.name,
-      customer_phone: payload.phone,
+      customer_phone: payload.phone.startsWith('+') ? payload.phone : `+1${payload.phone.replace(/\D/g, '')}`,
       city: payload.city,
       preferred_time: payload.preferred_time,
       num_tvs: parseInt(payload.num_tvs) || 1,
