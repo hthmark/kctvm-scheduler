@@ -59,11 +59,13 @@ router.post('/inbound', async (req, res) => {
       // Always check for Done regardless of pending jobs
       if (bodyLower === 'done' || bodyLower === 'complete' || bodyLower === 'finished') {
         console.log(`[SMS Inbound] Tech ${tech.name} replied Done — looking for confirmed job`);
-        const { data: confirmedJob } = await supabase
+        const { data: confirmedJobs } = await supabase
           .from('jobs').select('id')
           .eq('confirmed_tech_id', tech.id)
           .eq('status', 'confirmed')
-          .single();
+          .order('paid_at', { ascending: false })
+          .limit(1);
+        const confirmedJob = confirmedJobs?.[0] || null;
 
         if (confirmedJob) {
           console.log(`[SMS Inbound] Found confirmed job ${confirmedJob.id} — marking complete`);
