@@ -100,13 +100,19 @@ GABE'S COMMUNICATION STYLE:
 
 // ─── CONVERSATION HISTORY (persisted in Supabase) ────────────────────────────
 async function getHistory(phone) {
-  const { data } = await supabase
-    .from('sms_conversations')
-    .select('role, content')
-    .eq('phone', phone)
-    .order('created_at', { ascending: true })
-    .limit(20);
-  return (data || []).map(r => ({ role: r.role, content: r.content }));
+  try {
+    const { data } = await supabase
+      .from('sms_conversations')
+      .select('role, content')
+      .eq('phone', phone)
+      .in('role', ['user', 'assistant'])
+      .order('created_at', { ascending: true })
+      .limit(20);
+    return (data || []);
+  } catch (err) {
+    console.error('[Concierge] getHistory error:', err.message);
+    return [];
+  }
 }
 
 async function addToHistory(phone, role, content) {
