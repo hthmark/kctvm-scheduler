@@ -21,61 +21,39 @@ function attemptDateParse(str) {
 
   const input = str.toLowerCase().trim();
 
-  // Get current Chicago time
-  const nowChicagoStr = new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' });
-  const nowChicago = new Date(nowChicagoStr);
-
-  const todayChicago = new Date(nowChicago);
-  todayChicago.setHours(0, 0, 0, 0);
-
-  let hour = 9;
-  let minute = 0;
-
+  // Extract hour/minute
+  let hour = 9, minute = 0;
   const timeMatch = input.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
   if (timeMatch) {
     hour = parseInt(timeMatch[1]);
     minute = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
     if (timeMatch[3].toLowerCase() === 'pm' && hour !== 12) hour += 12;
     if (timeMatch[3].toLowerCase() === 'am' && hour === 12) hour = 0;
-  } else if (input.includes('noon')) {
-    hour = 12;
-  } else if (input.includes('morning')) {
-    hour = 9;
-  } else if (input.includes('afternoon')) {
-    hour = 13;
-  } else if (input.includes('evening')) {
-    hour = 17;
-  } else if (input.includes('night')) {
-    hour = 18;
-  }
+  } else if (input.includes('noon')) { hour = 12; }
+  else if (input.includes('morning')) { hour = 9; }
+  else if (input.includes('afternoon')) { hour = 13; }
+  else if (input.includes('evening')) { hour = 17; }
 
-  const time24Match = input.match(/(\d{2}):(\d{2})/);
-  if (time24Match && !timeMatch) {
-    hour = parseInt(time24Match[1]);
-    minute = parseInt(time24Match[2]);
-  }
+  // Get today's date in Chicago
+  const nowChicago = new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const [m, d, y] = nowChicago.split('/');
+  const today = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
 
-  console.log('[Calendar] Time parsed: hour=' + hour + ' minute=' + minute + ' from "' + str + '"');
+  let target = new Date(today);
 
-  let targetChicago = new Date(todayChicago);
-
-  if (input.includes('today')) {
-    // already set to today — time will be applied below
-  } else if (input.includes('tomorrow')) {
-    targetChicago.setDate(todayChicago.getDate() + 1);
-  } else {
+  if (input.includes('tomorrow')) {
+    target.setDate(target.getDate() + 1);
+  } else if (!input.includes('today')) {
     const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
     let foundDay = -1;
     for (let i = 0; i < days.length; i++) {
       if (input.includes(days[i])) { foundDay = i; break; }
     }
-
     if (foundDay !== -1) {
-      const currentDay = todayChicago.getDay();
-      let daysUntil = foundDay - currentDay;
+      let daysUntil = foundDay - today.getDay();
       if (daysUntil <= 0) daysUntil += 7;
       if (input.includes('next')) daysUntil += 7;
-      targetChicago.setDate(todayChicago.getDate() + daysUntil);
+      target.setDate(today.getDate() + daysUntil);
     } else {
       const months = ['january','february','march','april','may','june','july','august','september','october','november','december'];
       let foundMonth = -1;
@@ -85,29 +63,33 @@ function attemptDateParse(str) {
       if (foundMonth !== -1) {
         const dayMatch = input.match(/(\d{1,2})(st|nd|rd|th)?/);
         const dayNum = dayMatch ? parseInt(dayMatch[1]) : 1;
-        targetChicago = new Date(todayChicago.getFullYear(), foundMonth, dayNum, 0, 0, 0, 0);
-        if (targetChicago < todayChicago) targetChicago.setFullYear(todayChicago.getFullYear() + 1);
+        target = new Date(today.getFullYear(), foundMonth, dayNum);
+        if (target < today) target.setFullYear(today.getFullYear() + 1);
       } else {
-        console.warn(`[Calendar] Could not parse time: "${str}"`);
+        console.warn('[Calendar] Could not parse: "' + str + '"');
         return null;
       }
     }
   }
 
-  // Set hour/minute in Chicago local time
-  targetChicago.setHours(hour, minute, 0, 0);
+  // Build ISO string with Chicago offset (CDT = -05:00, CST = -06:00)
+  // Use Intl to get the actual offset for the target date
+  const testDate = new Date(target.getFullYear(), target.getMonth(), target.getDate(), hour, minute);
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', timeZoneName: 'shortOffset' });
+  const parts = formatter.formatToParts(testDate);
+  const offsetPart = parts.find(p => p.type === 'timeZoneName');
+  const offsetStr = offsetPart ? offsetPart.value : 'GMT-5';
+  const offsetMatch = offsetStr.match(/GMT([+-]\d+)/);
+  const offsetHours = offsetMatch ? parseInt(offsetMatch[1]) : -5;
+  const utcDate = new Date(testDate.getTime() - offsetHours * 60 * 60 * 1000);
 
-  // Convert Chicago local to UTC properly using offset
-  const chicagoOffset = getChicagoUTCOffsetMinutes(targetChicago);
-  const utcTime = new Date(targetChicago.getTime() + chicagoOffset * 60 * 1000);
-
-  if (utcTime <= new Date()) {
-    console.warn(`[Calendar] Parsed date is in the past: ${utcTime} for input "${str}"`);
+  if (utcDate <= new Date()) {
+    console.warn('[Calendar] Parsed date is in the past for "' + str + '"');
     return null;
   }
 
-  console.log(`[Calendar] Parsed "${str}" → Chicago local: ${targetChicago.toLocaleString('en-US', {timeZone:'America/Chicago'})} → UTC: ${utcTime.toISOString()}`);
-  return utcTime;
+  console.log('[Calendar] Parsed "' + str + '" → ' + hour + ':' + String(minute).padStart(2,'0') + ' Chicago → UTC: ' + utcDate.toISOString());
+  return utcDate;
 }
 
 /**
