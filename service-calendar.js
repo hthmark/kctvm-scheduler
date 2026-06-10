@@ -55,10 +55,12 @@ function attemptDateParse(str) {
     minute = parseInt(time24Match[2]);
   }
 
+  console.log('[Calendar] Time parsed: hour=' + hour + ' minute=' + minute + ' from "' + str + '"');
+
   let targetChicago = new Date(todayChicago);
 
   if (input.includes('today')) {
-    // already today
+    // already set to today — time will be applied below
   } else if (input.includes('tomorrow')) {
     targetChicago.setDate(todayChicago.getDate() + 1);
   } else {

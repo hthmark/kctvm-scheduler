@@ -10,7 +10,7 @@ const smsCounters = new Map();  // phone -> { minute: count, hour: count, lastRe
 
 const LIMITS = {
   PER_NUMBER_PER_HOUR: 15,    // max outbound texts to any single customer number per hour
-  PER_NUMBER_PER_MINUTE: 3,   // max outbound texts to any single number per minute
+  PER_NUMBER_PER_MINUTE: 6,   // max outbound texts to any single number per minute
 };
 
 function getCounters(phone) {
