@@ -60,7 +60,7 @@ router.post('/inbound', async (req, res) => {
         return;
       }
       await supabase.from('sms_conversations')
-        .insert({ phone: from, role: 'system', content: 'MSGID:' + messageId });
+        .insert({ phone: from, role: 'dedup', content: 'MSGID:' + messageId });
     }
 
     const normalizedFrom = from.replace(/\D/g, '');
