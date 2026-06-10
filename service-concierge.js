@@ -21,14 +21,17 @@ ABOUT KANSAS CITY TV MOUNTING (KCTVM):
 - Service area: Kansas City metro and surrounding suburbs
 
 PRICING:
-- First TV under 65": $140
-- First TV 65" or larger: $160
+- First TV under 65": $140 (installation only — does NOT include a mount)
+- First TV 65" or larger: $160 (installation only — does NOT include a mount)
 - Each additional TV under 65": $70
 - Each additional TV 65"+: $80
-- Fixed mount (if needed): +$60
-- Articulating/full motion mount: +$120
+- Fixed mount add-on (we pick it up): +$60
+- Articulating/full motion mount add-on (we pick it up): +$120
 - Brick wall: +$150 per TV
 - Wire/cable concealment: +$150 per TV
+- If customer already has a mount: no extra charge, we use theirs
+
+IMPORTANT: The base price is for installation labor only. A mount is NEVER included in the base price. It is always an optional add-on.
 
 WIRE CONCEALMENT:
 - We route wires behind drywall to an existing outlet
