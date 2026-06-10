@@ -88,9 +88,10 @@ async function getHistory(phone) {
       .from('sms_conversations')
       .select('role, content')
       .eq('phone', phone)
+      .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: true })
       .limit(20);
-    return (data || []).map(function(r) { return { role: r.role, content: r.content }; });
+    return (data || []);
   } catch (err) {
     console.error('[Concierge] getHistory error:', err.message);
     return [];
