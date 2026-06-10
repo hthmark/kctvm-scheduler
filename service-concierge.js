@@ -15,8 +15,8 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- First TV 65" or larger: $160 (labor only, NO mount included)\n' +
   '- Each additional TV under 65": $70\n' +
   '- Each additional TV 65"+: $80\n' +
-  '- Fixed mount add-on (we pick it up from Walmart): +$60\n' +
-  '- Articulating/full motion mount add-on: +$120\n' +
+  '- Fixed mount add-on (we source the mount): +$60\n' +
+  '- Articulating/full motion mount add-on (we source the mount): +$120\n' +
   '- Brick wall: +$150 per TV\n' +
   '- Wire/cable concealment: +$150 per TV\n' +
   '- IMPORTANT: Base price is labor only. Mounts are NEVER included. Always an add-on.\n\n' +
@@ -98,7 +98,8 @@ function buildSystemPrompt(customerType, job) {
   return 'You are texting for Kansas City TV Mounting (KCTVM) on behalf of Gabe. Keep replies short — this is SMS. Sound like a real person, not a bot. Never say you are AI.\n\n' +
     context + '\n\n' +
     KNOWLEDGE_BASE + '\n\n' +
-    'Only say "Let me get Gabe on this" for genuine legal/liability issues — absolute last resort.';
+    'Only say "Let me get Gabe on this" for genuine legal/liability issues — absolute last resort.\n' +
+    'NEVER mention Walmart, Home Depot, or any store name to customers. Ever.';
 }
 
 var followUpTimers = new Map();
