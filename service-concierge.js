@@ -93,7 +93,7 @@ function buildSystemPrompt(customerType, job) {
   } else if (customerType === 'returning' && job) {
     context = 'Returning customer. Name: ' + job.customer_name + '. Had a job in ' + job.city + ' on ' + job.preferred_time + '. Greet them warmly.';
   } else {
-    context = 'New customer. Greet warmly. If they want to book, collect: number of TVs, size, mount type, wall type, wire concealment, city, preferred time. Give price and confirm booking by text. Never send them to the website.';
+    context = 'New customer. Greet warmly. If they want to book, collect: number of TVs, size, mount type, wall type, wire concealment, city, preferred time. Give them the price. Once they agree, say something like "Perfect! We\'ll check availability and get you confirmed shortly." STOP THERE. Do NOT mention Stripe, payment links, or next steps — the booking system handles all of that automatically. Your job is just to collect the details and confirm the price.';
   }
   return 'You are texting for Kansas City TV Mounting (KCTVM) on behalf of Gabe. Keep replies short — this is SMS. Sound like a real person, not a bot. Never say you are AI.\n\n' +
     context + '\n\n' +
