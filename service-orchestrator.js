@@ -116,7 +116,12 @@ async function processNewJob(job) {
 async function handleCustomerTimeReply(job, timeText) {
   const parsedDate = attemptDateParse(timeText);
   if (!parsedDate) {
-    await sendSMS(job.customer_phone, `Thanks! Could you try a format like "Saturday June 14 at 2pm"?`);
+    const withToday = timeText.match(/^\d{1,2}(:\d{2})?\s*(am|pm)$/i) ? timeText + ' today' : null;
+    const retried = withToday ? attemptDateParse(withToday) : null;
+    if (retried) {
+      return handleCustomerTimeReply(job, withToday);
+    }
+    await sendSMS(job.customer_phone, `What time works for you? Just reply with something like "5pm today" or "tomorrow at 2pm"!`);
     return;
   }
   const available = await isTimeAvailable(parsedDate);

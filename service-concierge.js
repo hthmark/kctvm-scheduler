@@ -153,8 +153,10 @@ async function handleConciergeMessage(from, body) {
       }
     }
     var updatedHistory = await getHistory(from);
-    await checkAndCreateJob(from, updatedHistory);
-    await sendSMS(from, reply);
+    var jobCreated = await checkAndCreateJob(from, updatedHistory);
+    if (!jobCreated) {
+      await sendSMS(from, reply);
+    }
     await scheduleFollowUp(from, body);
   } catch (err) {
     console.error('[Concierge] Error:', err.message);
@@ -194,10 +196,12 @@ async function checkAndCreateJob(phone, history) {
         headers: { 'Content-Type': 'application/json' }
       });
       console.log('[Concierge] Job created for ' + phone);
+      return true;
     }
   } catch (err) {
     console.error('[Concierge] checkAndCreateJob error:', err.message);
   }
+  return false;
 }
 
 module.exports = { handleConciergeMessage };
