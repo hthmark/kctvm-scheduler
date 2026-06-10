@@ -371,8 +371,7 @@ async function checkAndCreateJob(phone, reply, latestMsg, history) {
   // Only run this check if conversation is long enough (at least 8 messages)
   if (history.length < 6) return;
 
-  const conversationText = history.map(m => `${m.role === 'user' ? 'Customer' : 'KCTVM'}: ${m.content}`).join('
-');
+  const conversationText = history.map(m => `${m.role === 'user' ? 'Customer' : 'KCTVM'}: ${m.content}`).join('\n');
 
   const extractPrompt = `Given this SMS conversation, determine if we have COMPLETE job details to create a booking.
 Required: customer name, phone, city, preferred time, number of TVs, TV sizes, mount type for each TV, wall type, wire concealment preference.
