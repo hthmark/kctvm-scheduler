@@ -31,7 +31,12 @@ function parseInbound(req) {
     if (data?.media && Array.isArray(data.media)) {
       data.media.forEach(m => { if (m.url) mediaUrls.push(m.url); });
     }
-    return { from: data?.from?.phone_number, body: (data?.text || '').trim(), mediaUrls };
+    return {
+      from: data?.from?.phone_number,
+      body: (data?.text || '').trim(),
+      mediaUrls,
+      messageId: req.body?.data?.id || null
+    };
   }
   return { from: null, body: null, mediaUrls: [] };
 }
@@ -39,8 +44,25 @@ function parseInbound(req) {
 router.post('/inbound', async (req, res) => {
   res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   try {
-    const { from, body, mediaUrls } = parseInbound(req);
+    const { from, body, mediaUrls, messageId } = parseInbound(req);
     if (!from) return;
+
+    // Deduplicate — Telnyx sometimes delivers the same webhook twice
+    if (messageId) {
+      const { data: existing } = await supabase
+        .from('sms_conversations')
+        .select('id')
+        .eq('phone', from)
+        .eq('content', 'MSGID:' + messageId)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        console.log('[SMS Inbound] Duplicate webhook ignored:', messageId);
+        return;
+      }
+      await supabase.from('sms_conversations')
+        .insert({ phone: from, role: 'system', content: 'MSGID:' + messageId });
+    }
+
     const normalizedFrom = from.replace(/\D/g, '');
     const bodyLower = (body || '').toLowerCase().trim();
     console.log(`[SMS Inbound] From: ${from} | Body: "${body}" | Media: ${mediaUrls.length} files`);
