@@ -3,6 +3,7 @@ const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const { handleTechReply, handleCustomerTimeReply, handleJobCompletion, handleTechPhotos } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
+console.log('[SMS Inbound] Concierge module loaded:', typeof handleConciergeMessage);
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -130,9 +131,11 @@ router.post('/inbound', async (req, res) => {
     // Customer is either: new, has active job in other state, or returning
     if (body) {
       console.log(`[SMS Inbound] Routing to AI concierge for ${from}`);
-      handleConciergeMessage(from, body).catch(err =>
-        console.error('[SMS Inbound] Concierge error:', err)
-      );
+      try {
+        await handleConciergeMessage(from, body);
+      } catch (err) {
+        console.error('[SMS Inbound] Concierge error full:', err.message, err.stack);
+      }
     }
 
   } catch (err) {
