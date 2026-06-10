@@ -1,38 +1,24 @@
 const { createClient } = require('@supabase/supabase-js');
 const { sendSMS } = require('./service-sms');
 const { isTimeAvailable, createJobEvent, confirmJobEvent, deleteJobEvent, attemptDateParse } = require('./service-calendar');
-const { generateTechMessage } = require('./service-claude');
+const { generateTechMessage, analyzeJobPhotos } = require('./service-claude');
 const { createPaymentLink, checkPaymentStatus } = require('./service-stripe');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const TECH_TIMEOUT_MS = (parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 30) * 60 * 1000;
 const GOOGLE_REVIEW_URL = 'https://g.page/r/CWmvZghawMfzEBM/review';
+const OWNER_PHONE = process.env.OWNER_PHONE || '+13862287246';
 
-// ─── WALMART MOUNT LINKS ──────────────────────────────────────────────────────
+// ─── WALMART MOUNT LINKS ─────────────────────────────────────────────────────
 const MOUNT_LINKS = {
   fixed: {
-    small: {
-      label: 'ONN Fixed Mount 32"-86"',
-      url: 'https://www.walmart.com/ip/777842123'
-    },
-    large: {
-      label: 'ONN Fixed Mount 80"-110"',
-      url: 'https://www.walmart.com/ip/ONNFIXED-MNT-80-110/13343901384'
-    }
+    small: { label: 'ONN Fixed Mount 32"-86"', url: 'https://www.walmart.com/ip/777842123' },
+    large: { label: 'ONN Fixed Mount 80"-110"', url: 'https://www.walmart.com/ip/ONNFIXED-MNT-80-110/13343901384' }
   },
   articulating: {
-    small_low: {
-      label: 'ONN Full Motion Mount 32"-47"',
-      url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-TVs-32-to-47/593012224'
-    },
-    small_high: {
-      label: 'ONN Full Motion Mount 47"-70"',
-      url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-47-to-70-TVs-Black/384156891'
-    },
-    large: {
-      label: 'ONN Full Motion Mount 50"-86"',
-      url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-50-to-86-TVs-up-to-15-Tilting/866844895'
-    }
+    small_low:  { label: 'ONN Full Motion 32"-47"', url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-TVs-32-to-47/593012224' },
+    small_high: { label: 'ONN Full Motion 47"-70"', url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-47-to-70-TVs-Black/384156891' },
+    large:      { label: 'ONN Full Motion 50"-86"', url: 'https://www.walmart.com/ip/onn-Full-Motion-TV-Wall-Mount-for-50-to-86-TVs-up-to-15-Tilting/866844895' }
   }
 };
 
@@ -42,71 +28,52 @@ const WIRE_CONCEAL_LINKS = [
   { label: 'Single Gang Box (1 per TV)', url: 'https://www.homedepot.com/p/Carlon-1-Gang-Non-Metallic-Low-Voltage-Old-Work-Bracket-SC100RR-SC100RR/100160916' }
 ];
 
-/**
- * Determine the correct mount link for a TV
- * Returns { label, url } or null if mount not needed or out of range
- */
 function getMountInfo(mountType, tvSize, tvInches) {
   if (mountType === 'yes' || mountType === 'no' || !mountType) return null;
   const inches = tvInches || (tvSize === 'large' ? 70 : 52);
-
   if (mountType === 'fixed') {
-    // Fixed: under 80" use 32-86 mount, 80"+ use 80-110 mount
     if (inches >= 80) return MOUNT_LINKS.fixed.large;
-    if (inches <= 86) return MOUNT_LINKS.fixed.small;
-    return null; // out of range
+    return MOUNT_LINKS.fixed.small;
   }
-
   if (mountType === 'articulating') {
-    if (inches <= 47) return MOUNT_LINKS.articulating.small_low;   // 32"-47"
-    if (inches <= 70) return MOUNT_LINKS.articulating.small_high;  // 47"-70"
-    if (inches <= 86) return MOUNT_LINKS.articulating.large;       // 70"-86"
-    return null; // out of range — 87"+ needs custom
+    if (inches <= 47) return MOUNT_LINKS.articulating.small_low;
+    if (inches <= 70) return MOUNT_LINKS.articulating.small_high;
+    if (inches <= 86) return MOUNT_LINKS.articulating.large;
+    return null;
   }
-
   return null;
 }
 
-/**
- * Build full supply list for a job — mounts, wire concealment, brick notes
- * Returns { mountItems, wireItems, brickTVs, outOfRangeTVs }
- */
 function buildSupplyList(job) {
-  const mountItems = [];
-  const wireItems = [];
-  const brickTVs = [];
-  const outOfRangeTVs = [];
-
+  const mountItems = [], wireItems = [], brickTVs = [], outOfRangeTVs = [];
   for (let i = 1; i <= 10; i++) {
     const size = job[`tv_${i}_size`];
     if (!size || size === 'null' || size === 'undefined') continue;
-
     const mount = job[`tv_${i}_mount`];
-    const wall = job[`tv_${i}_wall`];
-    const wire = job[`tv_${i}_wire`];
-
-    // Mount needed
+    const wall  = job[`tv_${i}_wall`];
+    const wire  = job[`tv_${i}_wire`];
+    const inches = job[`tv_${i}_inches`];
     if (mount === 'fixed' || mount === 'articulating') {
-      const mountInfo = getMountInfo(mount, size, job[`tv_${i}_inches`]);
-      if (mountInfo) {
-        mountItems.push({ tvNum: i, type: mount, size, ...mountInfo });
-      } else {
-        outOfRangeTVs.push({ tvNum: i, mount, size });
-      }
+      const mountInfo = getMountInfo(mount, size, inches);
+      if (mountInfo) mountItems.push({ tvNum: i, type: mount, size, inches, ...mountInfo });
+      else outOfRangeTVs.push({ tvNum: i, mount, size, inches });
     }
-
-    // Wire concealment needed
-    if (wire === 'cable') {
-      wireItems.push({ tvNum: i });
-    }
-
-    // Brick wall
-    if (wall === 'brick') {
-      brickTVs.push({ tvNum: i });
-    }
+    if (wire === 'cable') wireItems.push({ tvNum: i });
+    if (wall === 'brick') brickTVs.push({ tvNum: i });
   }
-
   return { mountItems, wireItems, brickTVs, outOfRangeTVs };
+}
+
+function calculateBasePayout(job) {
+  let payout = 0, tvCount = 0;
+  for (let i = 1; i <= 10; i++) {
+    const size = job[`tv_${i}_size`];
+    if (!size || size === 'null' || size === 'undefined') continue;
+    tvCount++;
+    payout += tvCount === 1 ? 60 : 40;
+    if (job[`tv_${i}_wire`] === 'cable') payout += 40;
+  }
+  return payout;
 }
 
 async function updateJob(jobId, updates) {
@@ -124,16 +91,13 @@ async function processNewJob(job) {
     if (available) {
       const eventId = await createJobEvent(job, preferredDate);
       await updateJob(job.id, { status: 'tech_search', scheduled_time: preferredDate.toISOString(), calendar_event_id: eventId, tech_search_index: 0 });
-
-      // Check for out-of-range TVs before dispatching
       const { outOfRangeTVs } = buildSupplyList(job);
       if (outOfRangeTVs.length > 0) {
         const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum}`).join(', ');
-        await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. For ${tvNums}, we'll need to order a custom mount online which takes about 2 days. Would it work to push your appointment back 2 days to ${job.preferred_time} + 2 days? Just reply Yes to confirm or suggest another time.`);
+        await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. For ${tvNums}, we'll need to order a custom mount online which takes about 2 days. Would it work to push your appointment back 2 days? Just reply Yes to confirm or suggest another time.`);
         await updateJob(job.id, { status: 'awaiting_time_confirm' });
         return;
       }
-
       await dispatchToNextTech(job.id);
     } else {
       await updateJob(job.id, { status: 'scheduling_conflict' });
@@ -239,15 +203,14 @@ async function checkPaymentReminder(jobId, stage) {
 async function handlePaymentComplete(job, address) {
   await updateJob(job.id, { status: 'confirmed', customer_address: address, paid_at: new Date().toISOString() });
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
-
   const { mountItems, wireItems, brickTVs } = buildSupplyList(job);
 
-  // Build human-readable TV summary
   const tvLines = [];
   for (let i = 1; i <= 10; i++) {
     const size = job[`tv_${i}_size`];
     if (!size || size === 'null') continue;
-    const sizeLabel = size === 'small' ? 'under 65"' : '65" or larger';
+    const inches = job[`tv_${i}_inches`];
+    const sizeLabel = inches ? `${inches}"` : (size === 'small' ? 'under 65"' : '65"+');
     const mount = job[`tv_${i}_mount`];
     const mountLabel = mount === 'yes' ? 'has mount' : mount === 'fixed' ? 'fixed mount needed' : mount === 'articulating' ? 'articulating mount needed' : mount;
     const wallLabel = job[`tv_${i}_wall`] === 'brick' ? 'BRICK WALL' : 'drywall';
@@ -255,33 +218,67 @@ async function handlePaymentComplete(job, address) {
     tvLines.push(`TV${i}: ${sizeLabel}, ${mountLabel}, ${wallLabel}, ${wireLabel}`);
   }
 
-  // Build supply section
   let supplySection = '';
-
   if (mountItems.length > 0) {
-    supplySection += `\n\n🛒 PICK UP MOUNTS FROM WALMART:`;
-    mountItems.forEach(m => {
-      supplySection += `\nTV${m.tvNum} — ${m.label}: ${m.url}`;
-    });
+    supplySection += `\n\n🛒 MOUNTS — pick up from Walmart:`;
+    mountItems.forEach(m => { supplySection += `\nTV${m.tvNum} (${m.inches || m.size}") — ${m.label}: ${m.url}`; });
   }
-
   if (wireItems.length > 0) {
-    supplySection += `\n\n🛒 PICK UP WIRE CONCEAL SUPPLIES (${wireItems.length}x each) FROM HOME DEPOT:`;
-    WIRE_CONCEAL_LINKS.forEach(item => {
-      supplySection += `\n${item.label}: ${item.url}`;
-    });
+    supplySection += `\n\n🛒 WIRE CONCEAL SUPPLIES (${wireItems.length}x each) — Home Depot:`;
+    WIRE_CONCEAL_LINKS.forEach(item => { supplySection += `\n${item.label}: ${item.url}`; });
   }
-
   if (brickTVs.length > 0) {
     const brickNums = brickTVs.map(t => `TV${t.tvNum}`).join(', ');
-    supplySection += `\n\n🧱 BRICK WALL — ${brickNums}: Bring masonry drill bits and appropriate anchors!`;
+    supplySection += `\n\n🧱 BRICK — ${brickNums}: Bring masonry drill bits + anchors!`;
   }
 
-  const techMsg = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n\n${tvLines.join('\n')}${supplySection}\n\nSend photos + receipts and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
+  const basePayout = calculateBasePayout(job);
+  await updateJob(job.id, { base_payout: basePayout });
 
+  const techMsg = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n\n${tvLines.join('\n')}${supplySection}\n\nBase payout: $${basePayout}\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
   await sendSMS(tech.phone, techMsg);
   await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]}! Payment received. ${tech.name.split(' ')[0]} will be there at ${job.preferred_time}. See you then!`);
   console.log(`[Orchestrator] Job ${job.id} confirmed — tech and customer notified`);
+}
+
+// ─── HANDLE PHOTOS FROM TECH (MMS) ───────────────────────────────────────────
+async function handleTechPhotos(jobId, techId, mediaUrls) {
+  if (!mediaUrls || mediaUrls.length === 0) return;
+  console.log(`[Orchestrator] Processing ${mediaUrls.length} photos for job ${jobId}`);
+
+  const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
+
+  // Use Claude to analyze photos — identify TV installation photos vs receipts
+  const { tvPhotos, receiptPhotos, receiptTotal } = await analyzeJobPhotos(mediaUrls, job.num_tvs);
+
+  // Store best TV photos (one per TV) in Supabase
+  const photoUpdate = {};
+  tvPhotos.forEach((url, i) => {
+    if (i < 10) photoUpdate[`tv_${i + 1}_photo`] = url;
+  });
+
+  // Store receipt total and photo URLs
+  const allReceiptUrls = receiptPhotos.join(',');
+  const basePayout = job.base_payout || calculateBasePayout(job);
+  const totalPayout = basePayout + (receiptTotal || 0);
+
+  await updateJob(jobId, {
+    ...photoUpdate,
+    receipt_photos: allReceiptUrls,
+    receipt_total: receiptTotal || 0,
+    total_payout: totalPayout,
+    photos_received_at: new Date().toISOString(),
+    payout_status: 'pending_payment',
+  });
+
+  console.log(`[Orchestrator] Job ${jobId} — ${tvPhotos.length} TV photos, ${receiptPhotos.length} receipts, receipt total $${receiptTotal}, total payout $${totalPayout}`);
+
+  // Text owner with payout summary
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+  const receiptNote = receiptTotal > 0 ? `\nReceipts: $${receiptTotal}` : '\nNo receipts';
+  await sendSMS(OWNER_PHONE,
+    `💰 PAYOUT NEEDED\n${tech.name}\nJob: ${job.customer_name} — ${job.city}\nBase: $${basePayout}${receiptNote}\nTOTAL: $${totalPayout}\n\nPay via Novo ACH when ready.`
+  );
 }
 
 async function handleJobCompletion(jobId) {
@@ -301,4 +298,4 @@ async function cancelJob(jobId, reason) {
   }
 }
 
-module.exports = { processNewJob, handleCustomerTimeReply, handleTechReply, handleJobCompletion, handlePaymentComplete, checkPaymentReminder, cancelJob, dispatchToNextTech };
+module.exports = { processNewJob, handleCustomerTimeReply, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech };
