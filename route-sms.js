@@ -46,7 +46,7 @@ router.post('/inbound', async (req, res) => {
   try {
     const { from, body, mediaUrls, messageId } = parseInbound(req);
     if (!from) return;
-    if (from === process.env.TELNYX_PHONE_NUMBER) return;
+    if (from === process.env.TELNYX_PHONE_NUMBER || from === '+18162032001') return;
 
     // Deduplicate — Telnyx sometimes delivers the same webhook twice
     if (messageId) {
