@@ -272,6 +272,9 @@ async function handleConciergeMessage(from, body) {
     // We detect when the reply confirms a job and triggers the booking flow
     await checkAndCreateJob(from, reply, body, history);
 
+    // Schedule follow-up if customer went cold after showing interest
+    await scheduleConversationFollowUp(from, body, reply);
+
     // Send reply to customer
     await sendSMS(from, reply);
     return reply;
@@ -282,6 +285,84 @@ async function handleConciergeMessage(from, body) {
     await sendSMS(OWNER_PHONE, `📱 CONCIERGE ERROR — manual reply needed\nFrom: ${from}\nMsg: "${body}"`);
     await sendSMS(from, `Hey! Thanks for reaching out to Kansas City TV Mounting. We'll get back to you shortly!`);
   }
+}
+
+// ─── FOLLOW UP FOR COLD CONCIERGE LEADS ─────────────────────────────────────
+const followUpTimers = new Map();
+
+async function scheduleConversationFollowUp(phone, customerMsg, aiReply) {
+  // Only schedule if the conversation looks like genuine interest
+  const interestKeywords = ['how much', 'price', 'cost', 'charge', 'available', 'schedule', 'book', 'mount', 'install', 'tv', 'interested', 'when', 'how long'];
+  const msgLower = customerMsg.toLowerCase();
+  const looksInterested = interestKeywords.some(k => msgLower.includes(k));
+  if (!looksInterested) return;
+
+  // Check if we already sent a follow-up to this number ever — one and done
+  const { data: alreadySent } = await supabase
+    .from('follow_up_sent')
+    .select('phone')
+    .eq('phone', phone)
+    .single();
+  if (alreadySent) {
+    console.log(`[Concierge] Follow-up already sent to ${phone} before — skipping`);
+    return;
+  }
+
+  // Cancel any existing timer and reset clock on each new message
+  if (followUpTimers.has(phone)) {
+    clearTimeout(followUpTimers.get(phone));
+  }
+
+  const timer = setTimeout(async () => {
+    followUpTimers.delete(phone);
+
+    // Check again — already sent? skip
+    const { data: alreadySentCheck } = await supabase
+      .from('follow_up_sent').select('phone').eq('phone', phone).single();
+    if (alreadySentCheck) return;
+
+    // Check if they have an active job now — already converted, skip
+    const normalized = phone.startsWith('+') ? phone : '+1' + phone.replace(/\D/g, '');
+    const { data: activeJobs } = await supabase
+      .from('jobs').select('id')
+      .or(`customer_phone.eq.${normalized},customer_phone.eq.${phone}`)
+      .not('status', 'in', '("cancelled","completed")')
+      .limit(1);
+    if (activeJobs && activeJobs.length > 0) {
+      console.log(`[Concierge] Follow-up skipped for ${phone} — already has active job`);
+      return;
+    }
+
+    // Check if they messaged recently — if so skip
+    const { data: recentMsg } = await supabase
+      .from('sms_conversations').select('created_at')
+      .eq('phone', phone).eq('role', 'user')
+      .order('created_at', { ascending: false }).limit(1);
+    if (recentMsg && recentMsg.length > 0) {
+      const timeSince = Date.now() - new Date(recentMsg[0].created_at).getTime();
+      if (timeSince < 2.5 * 60 * 60 * 1000) {
+        console.log(`[Concierge] Follow-up skipped for ${phone} — messaged recently`);
+        return;
+      }
+    }
+
+    // Get first name from conversation if we have it
+    const history = await getHistory(phone);
+    const nameMsg = history.find(m => m.role === 'user')?.content || '';
+    const nameMatch = nameMsg.match(/(?:i'm|my name is|this is)\s+([a-z]+)/i);
+    const greeting = nameMatch ? `Hey ${nameMatch[1]}` : 'Hey';
+
+    // Send the one and only follow-up
+    await sendSMS(phone, `${greeting}, just following up to see if you were still interested in getting your TV mounted? No worries if not!`);
+
+    // Record that we sent it — never send again
+    await supabase.from('follow_up_sent').insert({ phone });
+    console.log(`[Concierge] Follow-up sent to ${phone} — marked as sent permanently`);
+
+  }, 3 * 60 * 60 * 1000);
+
+  followUpTimers.set(phone, timer);
+  console.log(`[Concierge] Follow-up scheduled for ${phone} in 3 hours`);
 }
 
 // ─── JOB CREATION FROM CONCIERGE CONVERSATION ───────────────────────────────
