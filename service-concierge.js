@@ -261,9 +261,6 @@ async function handleConciergeMessage(from, body) {
                         reply.toLowerCase().includes("let me get gabe");
 
     if (needsManual) {
-      await sendSMS(OWNER_PHONE,
-        `📱 MANUAL REPLY NEEDED\nFrom: ${from}\nMsg: "${body}"\nAI replied: "${reply}"`
-      );
       console.log(`[Concierge] Flagged for manual follow-up: ${from}`);
     }
 
