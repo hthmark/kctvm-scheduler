@@ -22,6 +22,8 @@ app.use('/webhook', require('./route-webhook'));
 app.use('/sms', require('./route-sms'));
 app.use('/jobs', require('./route-jobs'));
 
+console.log('[Server] All routes loaded successfully');
+
 app.get('/', (req, res) => res.json({ status: 'KCTVM Scheduler running' }));
 app.get('/payment-success', (req, res) => {
   res.send('<html><body style="font-family:sans-serif;text-align:center;padding:60px"><h1>✅ Payment received!</h1><p>Your TV mounting appointment is confirmed. You\'ll receive a text shortly.</p></body></html>');

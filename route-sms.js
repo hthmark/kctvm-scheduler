@@ -2,8 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const { handleTechReply, handleCustomerTimeReply, handleJobCompletion, handleTechPhotos } = require('./service-orchestrator');
-const { handleConciergeMessage } = require('./service-concierge');
-console.log('[SMS Inbound] Concierge module loaded:', typeof handleConciergeMessage);
+let handleConciergeMessage;
+try {
+  handleConciergeMessage = require('./service-concierge').handleConciergeMessage;
+  console.log('[SMS] Concierge loaded OK');
+} catch (err) {
+  console.error('[SMS] Concierge load FAILED:', err.message);
+}
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -130,6 +135,10 @@ router.post('/inbound', async (req, res) => {
     // ── ROUTE TO AI CONCIERGE ────────────────────────────────────────────────
     // Customer is either: new, has active job in other state, or returning
     if (body) {
+      if (!handleConciergeMessage) {
+        console.error('[SMS Inbound] Concierge not loaded — cannot handle message from', from);
+        return;
+      }
       console.log(`[SMS Inbound] Routing to AI concierge for ${from}`);
       try {
         await handleConciergeMessage(from, body);
