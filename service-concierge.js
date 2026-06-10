@@ -152,6 +152,8 @@ async function handleConciergeMessage(from, body) {
         await sendSMS(OWNER_PHONE, 'MANUAL NEEDED\nFrom: ' + from + '\nMsg: ' + body);
       }
     }
+    var updatedHistory = await getHistory(from);
+    await checkAndCreateJob(from, updatedHistory);
     await sendSMS(from, reply);
     await scheduleFollowUp(from, body);
   } catch (err) {
@@ -162,6 +164,39 @@ async function handleConciergeMessage(from, body) {
     try {
       await sendSMS(from, 'Hey! Thanks for reaching out to Kansas City TV Mounting. We\'ll get back to you shortly!');
     } catch (e) { /* ignore */ }
+  }
+}
+
+async function checkAndCreateJob(phone, history) {
+  if (history.length < 4) return;
+  var conversationText = history.map(function(m) {
+    return (m.role === 'user' ? 'Customer' : 'KCTVM') + ': ' + m.content;
+  }).join('\n');
+  var prompt = 'Given this SMS conversation, determine if we have COMPLETE booking details.\n' +
+    'Required: customer name or just use "Customer", city, preferred time, number of TVs, TV size (small=under65 or large=65plus), mount type (yes/fixed/articulating), wall type (drywall/brick), wire concealment (no/cable), total price.\n\n' +
+    'Conversation:\n' + conversationText + '\n\n' +
+    'If ALL details are present and customer confirmed the price, respond with JSON only:\n' +
+    '{"ready":true,"name":"Customer","city":"city","preferred_time":"time","num_tvs":1,"total_price":200,"tv_1_size":"small","tv_1_mount":"fixed","tv_1_wall":"drywall","tv_1_wire":"no"}\n' +
+    'If not complete yet: {"ready":false}\n' +
+    'JSON only, no other text.';
+  try {
+    var r = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 400,
+      messages: [{ role: 'user', content: prompt }]
+    });
+    var text = r.content[0].text.trim().replace(/```json|```/g, '');
+    var data = JSON.parse(text);
+    if (data.ready) {
+      data.phone = phone;
+      delete data.ready;
+      await axios.post(process.env.BASE_URL + '/webhook/quote', data, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      console.log('[Concierge] Job created for ' + phone);
+    }
+  } catch (err) {
+    console.error('[Concierge] checkAndCreateJob error:', err.message);
   }
 }
 
