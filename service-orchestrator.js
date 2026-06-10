@@ -102,10 +102,14 @@ async function processNewJob(job) {
     } else {
       await updateJob(job.id, { status: 'scheduling_conflict' });
       await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. Unfortunately your preferred time of ${job.preferred_time} isn't available. What other times work for you?`);
+      // Schedule follow-up if no response in 3 hours
+      setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
     }
   } else {
     await updateJob(job.id, { status: 'awaiting_time_confirm' });
     await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. Thanks for your quote request! What specific date and time works best? (Example: "Saturday June 14 at 2pm")`);
+    // Schedule follow-up if no response in 3 hours
+    setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
   }
 }
 
@@ -296,6 +300,25 @@ async function cancelJob(jobId, reason) {
     const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
     if (tech) await sendSMS(tech.phone, `Hi ${tech.name.split(' ')[0]}, the ${job.city} job on ${job.preferred_time} has been cancelled. Sorry for the inconvenience!`);
   }
+}
+
+// ─── FOLLOW UP ───────────────────────────────────────────────────────────────
+async function sendFollowUp(jobId) {
+  const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
+  // Only send if still waiting on customer
+  if (job.status !== 'awaiting_time_confirm' && job.status !== 'scheduling_conflict') return;
+  // Check if we already sent a follow-up to this number ever — one and done
+  const { data: alreadySent } = await supabase
+    .from('follow_up_sent').select('phone').eq('phone', job.customer_phone).single();
+  if (alreadySent) {
+    console.log(`[Orchestrator] Follow-up already sent to ${job.customer_phone} before — skipping`);
+    return;
+  }
+  const firstName = job.customer_name.split(' ')[0];
+  await sendSMS(job.customer_phone, `Hey ${firstName}, just following up to see if you were still interested in getting your TV mounted? No worries if not!`);
+  await supabase.from('follow_up_sent').insert({ phone: job.customer_phone });
+  await updateJob(jobId, { follow_up_sent_at: new Date().toISOString() });
+  console.log(`[Orchestrator] Follow-up sent to ${job.customer_name} — marked permanently`);
 }
 
 module.exports = { processNewJob, handleCustomerTimeReply, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech };
