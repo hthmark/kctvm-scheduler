@@ -20,7 +20,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Brick wall: +$150 per TV\n' +
   '- Wire/cable concealment: +$150 per TV (requires existing outlet on same wall)\n' +
   '- IMPORTANT: Base price is labor only. Mounts are NEVER included. Always an add-on.\n' +
-  '- TVs 65" or larger: We may need a hand lifting it onto the mount. Ask if someone will be home to help with the lift — if not we\'d need to send two techs which would roughly double the cost. Keep it casual and friendly.\n\n' +
+  '- TVs 65" or larger: Always ask about the lift. Say it exactly like this: "Just a heads up - since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n\n' +
   'WIRE CONCEALMENT:\n' +
   '- Routes wires behind drywall to an existing outlet lower on the wall\n' +
   '- If no outlet on the same wall, installing one costs +$150\n' +
