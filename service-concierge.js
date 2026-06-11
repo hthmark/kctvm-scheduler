@@ -18,7 +18,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Fixed mount add-on (we source the mount): +$60\n' +
   '- Articulating/full motion mount add-on (we source the mount): +$120\n' +
   '- Brick wall: +$150 per TV\n' +
-  '- Wire/cable concealment: +$150 per TV\n' +
+  '- Wire/cable concealment: +$150 per TV (requires existing outlet on same wall)\n' +
   '- IMPORTANT: Base price is labor only. Mounts are NEVER included. Always an add-on.\n\n' +
   'WIRE CONCEALMENT:\n' +
   '- Routes wires behind drywall to an existing outlet lower on the wall\n' +
@@ -99,7 +99,8 @@ function buildSystemPrompt(customerType, job) {
     context + '\n\n' +
     KNOWLEDGE_BASE + '\n\n' +
     'Only say "Let me get Gabe on this" for genuine legal/liability issues — absolute last resort.\n' +
-    'NEVER mention Walmart, Home Depot, or any store name to customers. Ever.';
+    'NEVER mention Walmart, Home Depot, or any store name to customers. Ever.\n' +
+    'We do NOT install new outlets. If customer has no outlet on the wall, ask if they are flexible on TV placement location instead.';
 }
 
 var followUpTimers = new Map();
