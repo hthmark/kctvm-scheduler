@@ -300,8 +300,16 @@ async function handleTechPhotos(jobId, techId, mediaUrls) {
 async function handleJobCompletion(jobId) {
   const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
   await updateJob(jobId, { status: 'completed', completed_at: new Date().toISOString() });
-  await sendSMS(job.customer_phone, `Thank you for choosing Kansas City TV Mounting, ${job.customer_name.split(' ')[0]}! We hope everything looks great. We'd love a quick Google review if you have a moment: ${GOOGLE_REVIEW_URL}`);
-  console.log(`[Orchestrator] Job ${jobId} completed — review request sent to customer`);
+  // Thank the tech
+  if (job.confirmed_tech_id) {
+    const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
+    if (tech) {
+      await sendSMS(tech.phone, `Thanks for the help ${tech.name.split(' ')[0]}! Sending the payout your way.`);
+    }
+  }
+  // Send review request to customer
+  await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}! Hope the install went smoothly — we'd love to hear how everything went! If you have a moment, a quick Google review would mean the world to us: ${GOOGLE_REVIEW_URL}`);
+  console.log(`[Orchestrator] Job ${jobId} completed — tech thanked, review request sent to customer`);
 }
 
 async function cancelJob(jobId, reason) {
