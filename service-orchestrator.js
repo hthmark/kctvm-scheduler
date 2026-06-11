@@ -121,7 +121,11 @@ async function handleCustomerTimeReply(job, timeText) {
     if (retried) {
       return handleCustomerTimeReply(job, withToday);
     }
-    await sendSMS(job.customer_phone, `What time works for you?`);
+    const { shouldAlertOwner } = require('./service-ratelimit');
+    await sendSMS(job.customer_phone, `Let me check that for you!`);
+    if (shouldAlertOwner('time_parse:' + job.customer_phone)) {
+      await sendSMS(OWNER_PHONE, `📱 MANUAL NEEDED — couldn't parse time\nCustomer: ${job.customer_name}\nPhone: ${job.customer_phone}\nThey said: "${timeText}"`);
+    }
     return;
   }
   const available = await isTimeAvailable(parsedDate);
