@@ -172,7 +172,7 @@ async function handleConciergeMessage(from, body) {
 }
 
 async function checkAndCreateJob(phone, history) {
-  if (history.length < 4) return;
+  if (history.length < 2) return;
   var conversationText = history.map(function(m) {
     return (m.role === 'user' ? 'Customer' : 'KCTVM') + ': ' + m.content;
   }).join('\n');
