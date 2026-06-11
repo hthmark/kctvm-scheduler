@@ -101,7 +101,7 @@ async function processNewJob(job) {
       await dispatchToNextTech(job.id);
     } else {
       await updateJob(job.id, { status: 'scheduling_conflict' });
-      await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. Unfortunately your preferred time of ${job.preferred_time} isn't available. What other times work for you?`);
+      await sendSMS(job.customer_phone, `Hey! Unfortunately ${job.preferred_time} is already booked — do you have another time that works?`);
       // Schedule follow-up if no response in 3 hours
       setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
     }
@@ -121,13 +121,14 @@ async function handleCustomerTimeReply(job, timeText) {
     if (retried) {
       return handleCustomerTimeReply(job, withToday);
     }
-    await sendSMS(job.customer_phone, `What time works for you? Just reply with something like "5pm today" or "tomorrow at 2pm"!`);
+    await sendSMS(job.customer_phone, `What time works for you?`);
     return;
   }
   const available = await isTimeAvailable(parsedDate);
   if (available) {
     const eventId = await createJobEvent(job, parsedDate);
     await updateJob(job.id, { status: 'tech_search', scheduled_time: parsedDate.toISOString(), preferred_time: timeText, calendar_event_id: eventId, tech_search_index: 0 });
+    await sendSMS(job.customer_phone, `Got it, ${timeText} — let me check availability and get you confirmed!`);
     await dispatchToNextTech(job.id);
   } else {
     await sendSMS(job.customer_phone, `Sorry, ${timeText} is already booked. Do you have another time that works?`);
