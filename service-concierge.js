@@ -100,13 +100,13 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   return 'You are texting for Kansas City TV Mounting (KCTVM) on behalf of Gabe. Keep replies short — this is SMS. Sound like a real person, not a bot. Never say you are AI.\n\n' +
     context + '\n\n' +
     KNOWLEDGE_BASE + '\n\n' +
-    'SCHEDULING RULES:\n' +
-    '- "Soonest you can be here" or "today" always means check the calendar and find the earliest slot at least 4 hours from now. Never suggest a time less than 4 hours out — techs need travel and prep time. Do NOT tell the customer this reason.\n' +
-    '- If the customer asks for a specific time, check if it is at least 4 hours away. If not, offer the next available slot after that.\n' +
-    (nextSlot ? '- The next available time slot is ' + nextSlot.label + '. You MUST include this exact time in your response right now. Do not say you will check — you already have the answer. Say something like: "I see we have an opening at ' + nextSlot.label + ' — does that work for you? Also just confirming someone will be around to help with the lift?"\n' : '- If customer asks for soonest time but you do not have calendar info yet, just ask what time of day works best.\n') +
-    '- NEVER assume or mention a city that the customer has not told you in THIS conversation. If you do not have the city yet, ask for it BEFORE checking availability or proposing a time.\n' +
-    '- NEVER say "let me check availability" and then wait. When you say you will check availability, DO NOT wait for the customer to respond. Immediately submit the job using the details already collected and let the system handle it. Never say "give me a few minutes" and then do nothing.\n' +
-    '- A time followed by a question mark (e.g. "7pm?") means they are asking if 7pm works — treat it exactly the same as "7pm".\n\n' +
+    'SCHEDULING — READ THIS CAREFULLY:\n' +
+    '"Soonest", "earliest", "today", "asap", "as soon as possible" ALL mean: check the calendar and find the next available slot at least 4 hours from right now. You already have this time in nextSlot. PROPOSE IT IN YOUR RESPONSE. Do not ask when they want to come. Do not say you will check. You have already checked. Just say the time.\n' +
+    'Example: "I see we have an opening at 3:30 PM today — does that work for you?"\n' +
+    'Only submit the job AFTER the customer says yes to a specific time you proposed.\n' +
+    (nextSlot ? '- The next available time slot is ' + nextSlot.label + '. You MUST say this time in your reply RIGHT NOW.\n' : '- No calendar slot available yet — ask what time of day works best.\n') +
+    '- NEVER assume or mention a city the customer has not told you. Ask for it first.\n' +
+    '- A time followed by a question mark (e.g. "7pm?") means they are asking if 7pm works — treat it the same as "7pm".\n\n' +
     'CONVERSATION RULES:\n' +
     '- Do NOT mention Stripe, payment links, or locking in until AFTER the job is confirmed and the customer has agreed. Never bring it up during the booking conversation.\n' +
     '- Do NOT info dump. Answer only what the customer asked. One or two questions max per message.\n' +
@@ -249,6 +249,12 @@ async function checkAndCreateJob(phone, history) {
     var text = r.content[0].text.trim().replace(/```json|```/g, '');
     var data = JSON.parse(text);
     if (data.ready) {
+      // Never submit a job with a vague time
+      var vagueTerms = ['soonest', 'earliest', 'asap', 'as soon as', 'today', 'requesting'];
+      if (data.preferred_time && vagueTerms.some(function(t) { return data.preferred_time.toLowerCase().includes(t); })) {
+        console.log('[Concierge] Blocked job submission — time not confirmed yet: ' + data.preferred_time);
+        return false;
+      }
       data.phone = phone;
       delete data.ready;
       await axios.post(process.env.BASE_URL + '/webhook/quote', data, {

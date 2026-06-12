@@ -124,11 +124,7 @@ async function handleCustomerTimeReply(job, timeText) {
     if (retried) {
       return handleCustomerTimeReply(job, withToday);
     }
-    const { shouldAlertOwner } = require('./service-ratelimit');
-    await sendSMS(job.customer_phone, `Let me check that for you!`);
-    if (shouldAlertOwner('time_parse:' + job.customer_phone)) {
-      await sendSMS(OWNER_PHONE, `📱 MANUAL NEEDED — couldn't parse time\nCustomer: ${job.customer_name}\nPhone: ${job.customer_phone}\nThey said: "${timeText}"`);
-    }
+    console.log(`[Orchestrator] Job ${job.id} awaiting time confirm — no automated text sent, concierge handles this`);
     return;
   }
   const available = await isTimeAvailable(parsedDate);
