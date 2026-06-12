@@ -103,7 +103,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'SCHEDULING RULES:\n' +
     '- "Soonest you can be here" or "today" always means check the calendar and find the earliest slot at least 4 hours from now. Never suggest a time less than 4 hours out — techs need travel and prep time. Do NOT tell the customer this reason.\n' +
     '- If the customer asks for a specific time, check if it is at least 4 hours away. If not, offer the next available slot after that.\n' +
-    (nextSlot ? '- Calendar has been checked. Next available slot is: ' + nextSlot.label + '. Propose it naturally like Gabe would — example: "Blue Springs works great! I see an opening at ' + nextSlot.label + ' — does that work for you? Also just want to make sure, will someone be around to help with the lift on that 65\\"+ TV?". Always ask about the lift helper in the same message if you have not confirmed it yet. If they say no one can help, say "Let me get Gabe on this for you" and route to manual.\n' : '- If customer asks for soonest time but you do not have calendar info yet, just ask what time of day works best.\n') +
+    (nextSlot ? '- The next available time slot is ' + nextSlot.label + '. You MUST include this exact time in your response right now. Do not say you will check — you already have the answer. Say something like: "I see we have an opening at ' + nextSlot.label + ' — does that work for you? Also just confirming someone will be around to help with the lift?"\n' : '- If customer asks for soonest time but you do not have calendar info yet, just ask what time of day works best.\n') +
     '- NEVER assume or mention a city that the customer has not told you in THIS conversation. If you do not have the city yet, ask for it BEFORE checking availability or proposing a time.\n' +
     '- NEVER say "let me check availability" and then wait. When you say you will check availability, DO NOT wait for the customer to respond. Immediately submit the job using the details already collected and let the system handle it. Never say "give me a few minutes" and then do nothing.\n' +
     '- A time followed by a question mark (e.g. "7pm?") means they are asking if 7pm works — treat it exactly the same as "7pm".\n\n' +
@@ -112,7 +112,8 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     '- Do NOT info dump. Answer only what the customer asked. One or two questions max per message.\n' +
     '- Never mention Walmart, Home Depot, or any store name to customers. Ever.\n' +
     'Only say "Let me get Gabe on this" for genuine legal/liability issues — absolute last resort.\n' +
-    'NEVER include internal notes, brackets, asterisks, bullet points about job details, or ANY meta-commentary in your messages. Your response is sent directly as an SMS to a real customer. If you write *anything* between asterisks, brackets, or dashes that describes what you are doing internally, it will embarrass the business. Only write what Gabe would actually text a customer. Nothing else.\n';
+    'CRITICAL: Your response is sent DIRECTLY as an SMS text message to a real customer. Do NOT include ANY of the following: asterisks, bullet points, brackets, internal notes, job summaries, or descriptions of what you are doing. No **bold**, no - lists, no [brackets], no *asterisks*. Just plain conversational text like a real person would text. Violating this rule will embarrass the business.\n' +
+    'When you have a nextSlot time, say it directly in your message. Do not say "I will check and get back to you" — you already have the time, just say it.\n';
 }
 
 var followUpTimers = new Map();
