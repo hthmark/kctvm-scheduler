@@ -184,7 +184,8 @@ async function handleConciergeMessage(from, body) {
     // If conversation has all details and customer asked for soonest time, check calendar
     var history = await getHistory(from);
     var msgLower = body.toLowerCase();
-    var wantsEarliestTime = msgLower.includes('soonest') || msgLower.includes('earliest') || msgLower.includes('asap') || msgLower.includes('today') || msgLower.includes('as soon as');
+    var wantsEarliestTime = msgLower.includes('soonest') || msgLower.includes('earliest') || msgLower.includes('asap') || msgLower.includes('today') || msgLower.includes('as soon as') ||
+      history.some(function(m) { return m.role === 'user' && (m.content.toLowerCase().includes('soonest') || m.content.toLowerCase().includes('earliest') || m.content.toLowerCase().includes('asap')); });
     var nextSlot = null;
     var hasCity = history.some(function(m) { return m.role === 'user' && (m.content.toLowerCase().includes('springs') || m.content.toLowerCase().includes('city') || m.content.toLowerCase().includes('kansas') || m.content.toLowerCase().includes('overland') || m.content.toLowerCase().includes('summit') || m.content.toLowerCase().includes('olathe') || m.content.toLowerCase().includes('independence') || m.content.toLowerCase().includes('liberty') || m.content.toLowerCase().includes('gladstone') || m.content.toLowerCase().includes('independence')); });
     if (wantsEarliestTime && hasCity && history.length >= 2) {
