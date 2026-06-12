@@ -111,7 +111,8 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     '- Do NOT mention Stripe, payment links, or locking in until AFTER the job is confirmed and the customer has agreed. Never bring it up during the booking conversation.\n' +
     '- Do NOT info dump. Answer only what the customer asked. One or two questions max per message.\n' +
     '- Never mention Walmart, Home Depot, or any store name to customers. Ever.\n' +
-    'Only say "Let me get Gabe on this" for genuine legal/liability issues — absolute last resort.\n';
+    'Only say "Let me get Gabe on this" for genuine legal/liability issues — absolute last resort.\n' +
+    'NEVER include internal notes, brackets, asterisks, bullet points about job details, or ANY meta-commentary in your messages. Your response is sent directly as an SMS to a real customer. If you write *anything* between asterisks, brackets, or dashes that describes what you are doing internally, it will embarrass the business. Only write what Gabe would actually text a customer. Nothing else.\n';
 }
 
 var followUpTimers = new Map();
