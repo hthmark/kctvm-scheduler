@@ -104,6 +104,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     '- "Soonest you can be here" or "today" always means check the calendar and find the earliest slot at least 4 hours from now. Never suggest a time less than 4 hours out — techs need travel and prep time. Do NOT tell the customer this reason.\n' +
     '- If the customer asks for a specific time, check if it is at least 4 hours away. If not, offer the next available slot after that.\n' +
     (nextSlot ? '- Calendar has been checked. Next available slot is: ' + nextSlot.label + '. Propose it naturally like Gabe would — example: "Blue Springs works great! I see an opening at ' + nextSlot.label + ' — does that work for you? Also just want to make sure, will someone be around to help with the lift on that 65\\"+ TV?". Always ask about the lift helper in the same message if you have not confirmed it yet. If they say no one can help, say "Let me get Gabe on this for you" and route to manual.\n' : '- If customer asks for soonest time but you do not have calendar info yet, just ask what time of day works best.\n') +
+    '- NEVER assume or mention a city that the customer has not told you in THIS conversation. If you do not have the city yet, ask for it BEFORE checking availability or proposing a time.\n' +
     '- NEVER say "let me check availability" and then wait. When you say you will check availability, DO NOT wait for the customer to respond. Immediately submit the job using the details already collected and let the system handle it. Never say "give me a few minutes" and then do nothing.\n' +
     '- A time followed by a question mark (e.g. "7pm?") means they are asking if 7pm works — treat it exactly the same as "7pm".\n\n' +
     'CONVERSATION RULES:\n' +
@@ -185,7 +186,8 @@ async function handleConciergeMessage(from, body) {
     var msgLower = body.toLowerCase();
     var wantsEarliestTime = msgLower.includes('soonest') || msgLower.includes('earliest') || msgLower.includes('asap') || msgLower.includes('today') || msgLower.includes('as soon as');
     var nextSlot = null;
-    if (wantsEarliestTime && history.length >= 2) {
+    var hasCity = history.some(function(m) { return m.role === 'user' && (m.content.toLowerCase().includes('springs') || m.content.toLowerCase().includes('city') || m.content.toLowerCase().includes('kansas') || m.content.toLowerCase().includes('overland') || m.content.toLowerCase().includes('summit') || m.content.toLowerCase().includes('olathe') || m.content.toLowerCase().includes('independence') || m.content.toLowerCase().includes('liberty') || m.content.toLowerCase().includes('gladstone') || m.content.toLowerCase().includes('independence')); });
+    if (wantsEarliestTime && hasCity && history.length >= 2) {
       nextSlot = await findNextAvailableTime();
     }
 
