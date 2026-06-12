@@ -20,7 +20,8 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Brick wall: +$150 per TV\n' +
   '- Wire/cable concealment: +$150 per TV (requires existing outlet on same wall)\n' +
   '- IMPORTANT: Base price is labor only. Mounts are NEVER included. Always an add-on.\n' +
-  '- TVs 65" or larger: Always ask about the lift. Say it exactly like this: "Just a heads up - since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n\n' +
+  '- TVs 65" or larger: You MUST confirm someone will help with the lift before proposing a time or submitting the job. If they say no one can help, say "Let me get Gabe on this for you" — do not proceed.\n' +
+  '- TVs 65" or larger: Ask about the lift like this: "Just a heads up - since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n\n' +
   'WIRE CONCEALMENT:\n' +
   '- Routes wires behind drywall to an existing outlet lower on the wall\n' +
   '- If no outlet on the same wall, installing one costs +$150\n' +
@@ -102,7 +103,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'SCHEDULING RULES:\n' +
     '- "Soonest you can be here" or "today" always means check the calendar and find the earliest slot at least 4 hours from now. Never suggest a time less than 4 hours out — techs need travel and prep time. Do NOT tell the customer this reason.\n' +
     '- If the customer asks for a specific time, check if it is at least 4 hours away. If not, offer the next available slot after that.\n' +
-    (nextSlot ? '- Calendar has been checked. Next available slot is: ' + nextSlot.label + '. Propose this time naturally to the customer. Example: "Earliest we could do is ' + nextSlot.label + ' — does that work for you?"\n' : '- If customer asks for soonest time but you do not have calendar info yet, just ask what time of day works best.\n') +
+    (nextSlot ? '- Calendar has been checked. Next available slot is: ' + nextSlot.label + '. Propose it naturally like Gabe would — example: "Blue Springs works great! I see an opening at ' + nextSlot.label + ' — does that work for you? Also just want to make sure, will someone be around to help with the lift on that 65\\"+ TV?". Always ask about the lift helper in the same message if you have not confirmed it yet. If they say no one can help, say "Let me get Gabe on this for you" and route to manual.\n' : '- If customer asks for soonest time but you do not have calendar info yet, just ask what time of day works best.\n') +
     '- NEVER say "let me check availability" and then wait. When you say you will check availability, DO NOT wait for the customer to respond. Immediately submit the job using the details already collected and let the system handle it. Never say "give me a few minutes" and then do nothing.\n' +
     '- A time followed by a question mark (e.g. "7pm?") means they are asking if 7pm works — treat it exactly the same as "7pm".\n\n' +
     'CONVERSATION RULES:\n' +
