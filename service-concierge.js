@@ -87,7 +87,7 @@ async function identifyCustomer(phone) {
   return { type: 'new', job: null };
 }
 
-function buildSystemPrompt(customerType, job) {
+function buildSystemPrompt(customerType, job, nextSlot) {
   var context = '';
   if (customerType === 'active' && job) {
     context = 'This customer has an active job. Name: ' + job.customer_name + '. Status: ' + job.status + '. Time: ' + job.preferred_time + '. City: ' + job.city + '. If awaiting_payment, remind them their payment link was already sent.';
@@ -102,7 +102,8 @@ function buildSystemPrompt(customerType, job) {
     'SCHEDULING RULES:\n' +
     '- "Soonest you can be here" or "today" always means check the calendar and find the earliest slot at least 4 hours from now. Never suggest a time less than 4 hours out — techs need travel and prep time. Do NOT tell the customer this reason.\n' +
     '- If the customer asks for a specific time, check if it is at least 4 hours away. If not, offer the next available slot after that.\n' +
-    '- When you say you will check availability, DO NOT wait for the customer to respond. Immediately submit the job using the details already collected and let the system handle it. Never say "give me a few minutes" and then do nothing.\n' +
+    (nextSlot ? '- Calendar has been checked. Next available slot is: ' + nextSlot.label + '. Propose this time naturally to the customer. Example: "Earliest we could do is ' + nextSlot.label + ' — does that work for you?"\n' : '- If customer asks for soonest time but you do not have calendar info yet, just ask what time of day works best.\n') +
+    '- NEVER say "let me check availability" and then wait. When you say you will check availability, DO NOT wait for the customer to respond. Immediately submit the job using the details already collected and let the system handle it. Never say "give me a few minutes" and then do nothing.\n' +
     '- A time followed by a question mark (e.g. "7pm?") means they are asking if 7pm works — treat it exactly the same as "7pm".\n\n' +
     'CONVERSATION RULES:\n' +
     '- Do NOT mention Stripe, payment links, or locking in until AFTER the job is confirmed and the customer has agreed. Never bring it up during the booking conversation.\n' +
@@ -138,14 +139,57 @@ async function scheduleFollowUp(phone, msg) {
   followUpTimers.set(phone, timer);
 }
 
+async function findNextAvailableTime() {
+  const { isTimeAvailable } = require('./service-calendar');
+  const now = new Date();
+
+  // Start at least 4 hours from now, rounded to next half hour
+  let candidate = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+  candidate.setMinutes(candidate.getMinutes() < 30 ? 30 : 0);
+  if (candidate.getMinutes() === 0) candidate.setHours(candidate.getHours() + 1);
+
+  // Try up to 20 slots in 30-minute increments
+  for (let i = 0; i < 20; i++) {
+    try {
+      const available = await isTimeAvailable(candidate);
+      if (available) {
+        const timeStr = candidate.toLocaleString('en-US', {
+          timeZone: 'America/Chicago',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+          weekday: 'short',
+          month: 'numeric',
+          day: 'numeric'
+        });
+        return { time: candidate, label: timeStr };
+      }
+    } catch (err) {
+      console.error('[Concierge] Calendar check error:', err.message);
+      break;
+    }
+    candidate = new Date(candidate.getTime() + 30 * 60 * 1000);
+  }
+  return null;
+}
+
 async function handleConciergeMessage(from, body) {
   console.log('[Concierge] Message from ' + from + ': "' + body + '"');
   try {
     var info = await identifyCustomer(from);
     console.log('[Concierge] Customer type: ' + info.type);
+
+    // If conversation has all details and customer asked for soonest time, check calendar
     var history = await getHistory(from);
+    var msgLower = body.toLowerCase();
+    var wantsEarliestTime = msgLower.includes('soonest') || msgLower.includes('earliest') || msgLower.includes('asap') || msgLower.includes('today') || msgLower.includes('as soon as');
+    var nextSlot = null;
+    if (wantsEarliestTime && history.length >= 2) {
+      nextSlot = await findNextAvailableTime();
+    }
+
     var messages = history.slice(-10).concat([{ role: 'user', content: body }]);
-    var systemPrompt = buildSystemPrompt(info.type, info.job);
+    var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
     var response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 300,
