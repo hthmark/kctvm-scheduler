@@ -101,7 +101,10 @@ async function processNewJob(job) {
       await dispatchToNextTech(job.id);
     } else {
       await updateJob(job.id, { status: 'scheduling_conflict' });
-      await sendSMS(job.customer_phone, `Hey! Unfortunately ${job.preferred_time} is already booked — do you have another time that works?`);
+      // Find next available slot silently instead of texting customer
+      console.log(`[Orchestrator] Conflict at ${job.preferred_time} — finding next slot`);
+      await updateJob(job.id, { status: 'awaiting_time_confirm' });
+      // Don't text customer — concierge will handle rescheduling naturally
       // Schedule follow-up if no response in 3 hours
       setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
     }
