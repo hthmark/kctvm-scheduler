@@ -152,6 +152,42 @@ router.post('/inbound', async (req, res) => {
         console.log(`[SMS Inbound] Customer in time-confirm workflow — routing to handleCustomerTimeReply`);
         await handleCustomerTimeReply(workflowJobs[0], body);
         return;
+      } else {
+        // Check if customer has a job in awaiting_tech_reply and is rescheduling
+        const { data: techReplyJobs } = await supabase
+          .from('jobs').select('*')
+          .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+          .eq('status', 'awaiting_tech_reply')
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (techReplyJobs && techReplyJobs.length > 0) {
+          const { attemptDateParse, isTimeAvailable, createJobEvent, deleteJobEvent } = require('./service-calendar');
+          const newTime = attemptDateParse(body);
+          if (newTime) {
+            const job = techReplyJobs[0];
+            if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
+            const available = await isTimeAvailable(newTime);
+            if (available) {
+              const newEventId = await createJobEvent(job, newTime);
+              await supabase.from('jobs').update({
+                preferred_time: body,
+                scheduled_time: newTime.toISOString(),
+                calendar_event_id: newEventId,
+                tech_search_index: 0,
+                updated_at: new Date().toISOString()
+              }).eq('id', job.id);
+              if (job.current_tech_id) {
+                const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.current_tech_id).single();
+                if (tech) {
+                  const { sendSMS } = require('./service-sms');
+                  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, sorry — same job but the customer rescheduled for ${body}. Still interested? Please reply "Yes" if you're available or "No" if you're not.`);
+                }
+              }
+              console.log(`[SMS Inbound] Customer rescheduled job ${job.id} to ${body}`);
+              return;
+            }
+          }
+        }
       }
     }
 
