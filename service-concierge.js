@@ -300,7 +300,11 @@ async function scheduleFollowUp(phone, msg) {
 }
 
 async function checkAndCreateJob(phone, history) {
-  if (history.length < 2) return false;
+  console.log('[checkAndCreateJob] Called for ' + phone + ' with ' + history.length + ' messages');
+  if (history.length < 2) {
+    console.log('[checkAndCreateJob] BLOCKED — history too short: ' + history.length);
+    return false;
+  }
   var conversationText = history.map(function(m) {
     return (m.role === 'user' ? 'Customer' : 'KCTVM') + ': ' + m.content;
   }).join('\n');
@@ -322,22 +326,27 @@ async function checkAndCreateJob(phone, history) {
     });
     var text = r.content[0].text.trim().replace(/```json|```/g, '');
     var data = JSON.parse(text);
-    if (!data.ready) return false;
+    console.log('[checkAndCreateJob] Extraction result: ' + JSON.stringify(data));
+    if (!data.ready) {
+      console.log('[checkAndCreateJob] BLOCKED — Claude says not ready');
+      return false;
+    }
 
     // Block vague times
     var hasSpecificTime = data.preferred_time && data.preferred_time.match(/\d{1,2}(:\d{2})?\s*(am|pm)/i);
     var vagueTerms = ['soonest', 'earliest', 'asap', 'as soon as', 'requesting', 'available'];
     if (!hasSpecificTime && data.preferred_time && vagueTerms.some(function(t) { return data.preferred_time.toLowerCase().includes(t); })) {
-      console.log('[Concierge] Blocked job submission — time not confirmed yet: ' + data.preferred_time);
+      console.log('[checkAndCreateJob] BLOCKED — vague time: ' + data.preferred_time);
       return false;
     }
 
+    console.log('[checkAndCreateJob] SUBMITTING job for ' + phone + ' at ' + data.preferred_time);
     var payload = Object.assign({}, data, { phone: phone });
     delete payload.ready;
     await axios.post(process.env.BASE_URL + '/webhook/quote', payload, {
       headers: { 'Content-Type': 'application/json' }
     });
-    console.log('[Concierge] Job created for ' + phone);
+    console.log('[checkAndCreateJob] Job created for ' + phone);
     return true;
   } catch (err) {
     console.error('[Concierge] checkAndCreateJob error:', err.message);
