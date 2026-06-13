@@ -41,6 +41,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Electrical outlet installation\n' +
   '- Any work that is not TV mounting or wire concealment\n' +
   '- If asked about something we don\'t do, say: "That\'s not something we offer but we\'re happy to help with the TV mounting!"\n\n' +
+  'TV SIZE FROM PHOTO: If a customer sends a photo of the TV sticker/label, identify the model number and determine the screen size. Tell them the size and confirm pricing. Use it to also recommend the correct mount type if needed.\n\n' +
   'GABE\'S STYLE: Casual, friendly, short sentences. "Amazing!", "Perfect!", "No worries!" Not corporate. Not a bot. Never mention Walmart, Home Depot, or any store name to customers.';
 
 async function getHistory(phone) {
@@ -355,7 +356,8 @@ async function checkAndCreateJob(phone, history) {
   }
 }
 
-async function handleConciergeMessage(from, body) {
+async function handleConciergeMessage(from, body, mediaUrls) {
+  mediaUrls = mediaUrls || [];
   console.log('[Concierge] Message from ' + from + ': "' + body + '"');
   try {
     var info = await identifyCustomer(from);
@@ -387,7 +389,23 @@ async function handleConciergeMessage(from, body) {
       nextSlot = await findNextAvailableTime(requestedTime);
     }
 
-    var messages = history.slice(-10).concat([{ role: 'user', content: body }]);
+    var userContent = [];
+    if (mediaUrls && mediaUrls.length > 0) {
+      for (var i = 0; i < mediaUrls.length; i++) {
+        try {
+          var imgResp = await axios.get(mediaUrls[i], { responseType: 'arraybuffer' });
+          var b64 = Buffer.from(imgResp.data).toString('base64');
+          var ct = imgResp.headers['content-type'] || 'image/jpeg';
+          userContent.push({ type: 'image', source: { type: 'base64', media_type: ct, data: b64 } });
+        } catch(e) { console.error('[Concierge] Image fetch error:', e.message); }
+      }
+    }
+    if (body && body.trim()) userContent.push({ type: 'text', text: body });
+    if (userContent.length === 0) userContent = [{ type: 'text', text: body || '' }];
+    var userMessage = userContent.length === 1 && userContent[0].type === 'text'
+      ? { role: 'user', content: userContent[0].text }
+      : { role: 'user', content: userContent };
+    var messages = history.slice(-10).concat([userMessage]);
     var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
 
     var response = await client.messages.create({

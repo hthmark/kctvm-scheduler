@@ -141,7 +141,7 @@ router.post('/inbound', async (req, res) => {
     // Customer is either: new, has active job in other state, or returning
     if (body) {
       console.log(`[SMS Inbound] Routing to AI concierge for ${from}`);
-      handleConciergeMessage(from, body).catch(err =>
+      handleConciergeMessage(from, body, mediaUrls).catch(err =>
         console.error('[SMS Inbound] Concierge error:', err)
       );
     }
