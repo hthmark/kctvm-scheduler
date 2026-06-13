@@ -2,13 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const { handleTechReply, handleCustomerTimeReply, handleJobCompletion, handleTechPhotos } = require('./service-orchestrator');
-let handleConciergeMessage;
-try {
-  handleConciergeMessage = require('./service-concierge').handleConciergeMessage;
-  console.log('[SMS] Concierge loaded OK');
-} catch (err) {
-  console.error('[SMS] Concierge load FAILED:', err.message);
-}
+const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -31,12 +25,7 @@ function parseInbound(req) {
     if (data?.media && Array.isArray(data.media)) {
       data.media.forEach(m => { if (m.url) mediaUrls.push(m.url); });
     }
-    return {
-      from: data?.from?.phone_number,
-      body: (data?.text || '').trim(),
-      mediaUrls,
-      messageId: req.body?.data?.id || null
-    };
+    return { from: data?.from?.phone_number, body: (data?.text || '').trim(), mediaUrls };
   }
   return { from: null, body: null, mediaUrls: [] };
 }
@@ -44,26 +33,8 @@ function parseInbound(req) {
 router.post('/inbound', async (req, res) => {
   res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   try {
-    const { from, body, mediaUrls, messageId } = parseInbound(req);
+    const { from, body, mediaUrls } = parseInbound(req);
     if (!from) return;
-    if (from === process.env.TELNYX_PHONE_NUMBER || from === '+18162032001') return;
-
-    // Deduplicate — Telnyx sometimes delivers the same webhook twice
-    if (messageId) {
-      const { data: existing } = await supabase
-        .from('sms_conversations')
-        .select('id')
-        .eq('phone', from)
-        .eq('content', 'MSGID:' + messageId)
-        .limit(1);
-      if (existing && existing.length > 0) {
-        console.log('[SMS Inbound] Duplicate webhook ignored:', messageId);
-        return;
-      }
-      await supabase.from('sms_conversations')
-        .insert({ phone: from, role: 'dedup', content: 'MSGID:' + messageId });
-    }
-
     const normalizedFrom = from.replace(/\D/g, '');
     const bodyLower = (body || '').toLowerCase().trim();
     console.log(`[SMS Inbound] From: ${from} | Body: "${body}" | Media: ${mediaUrls.length} files`);
@@ -132,7 +103,16 @@ router.post('/inbound', async (req, res) => {
         }
       }
 
-      // Tech sent something else — ignore silently (they may be chatting)
+      // Check if tech mentions money/supplies without a receipt photo
+      var moneyKeywords = ['spent', 'paid', 'cost', 'receipt', 'reimbur', 'supplies', 'bought', 'picked up', '$'];
+      var mentionsMoney = moneyKeywords.some(function(k) { return bodyLower.includes(k); });
+      if (mentionsMoney && mediaUrls.length === 0) {
+        const { sendSMS: sms } = require('./service-sms');
+        await sms(from, 'No problem! Can you send a photo of the receipt so we can add it to your payout?');
+        return;
+      }
+
+      // Tech sent something else — ignore silently
       return;
     }
 
@@ -152,58 +132,16 @@ router.post('/inbound', async (req, res) => {
         console.log(`[SMS Inbound] Customer in time-confirm workflow — routing to handleCustomerTimeReply`);
         await handleCustomerTimeReply(workflowJobs[0], body);
         return;
-      } else {
-        // Check if customer has a job in awaiting_tech_reply and is rescheduling
-        const { data: techReplyJobs } = await supabase
-          .from('jobs').select('*')
-          .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
-          .eq('status', 'awaiting_tech_reply')
-          .order('created_at', { ascending: false })
-          .limit(1);
-        if (techReplyJobs && techReplyJobs.length > 0) {
-          const { attemptDateParse, isTimeAvailable, createJobEvent, deleteJobEvent } = require('./service-calendar');
-          const newTime = attemptDateParse(body);
-          if (newTime) {
-            const job = techReplyJobs[0];
-            if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
-            const available = await isTimeAvailable(newTime);
-            if (available) {
-              const newEventId = await createJobEvent(job, newTime);
-              await supabase.from('jobs').update({
-                preferred_time: body,
-                scheduled_time: newTime.toISOString(),
-                calendar_event_id: newEventId,
-                tech_search_index: 0,
-                updated_at: new Date().toISOString()
-              }).eq('id', job.id);
-              if (job.current_tech_id) {
-                const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.current_tech_id).single();
-                if (tech) {
-                  const { sendSMS } = require('./service-sms');
-                  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, sorry — same job but the customer rescheduled for ${body}. Still interested? Please reply "Yes" if you're available or "No" if you're not.`);
-                }
-              }
-              console.log(`[SMS Inbound] Customer rescheduled job ${job.id} to ${body}`);
-              return;
-            }
-          }
-        }
       }
     }
 
     // ── ROUTE TO AI CONCIERGE ────────────────────────────────────────────────
     // Customer is either: new, has active job in other state, or returning
     if (body) {
-      if (!handleConciergeMessage) {
-        console.error('[SMS Inbound] Concierge not loaded — cannot handle message from', from);
-        return;
-      }
       console.log(`[SMS Inbound] Routing to AI concierge for ${from}`);
-      try {
-        await handleConciergeMessage(from, body);
-      } catch (err) {
-        console.error('[SMS Inbound] Concierge error full:', err.message, err.stack);
-      }
+      handleConciergeMessage(from, body).catch(err =>
+        console.error('[SMS Inbound] Concierge error:', err)
+      );
     }
 
   } catch (err) {

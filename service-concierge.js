@@ -15,26 +15,33 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- First TV 65" or larger: $160 (labor only, NO mount included)\n' +
   '- Each additional TV under 65": $70\n' +
   '- Each additional TV 65"+: $80\n' +
-  '- Fixed mount add-on (we source the mount): +$60\n' +
-  '- When quoting with a mount, always ask "unless you have your own mount?" at the end — never assume they need one.\n' +
-  '- Articulating/full motion mount add-on (we source the mount): +$120\n' +
+  '- Fixed mount add-on (we source it): +$60\n' +
+  '- Articulating/full motion mount add-on (we source it): +$120\n' +
   '- Brick wall: +$150 per TV\n' +
   '- Wire/cable concealment: +$150 per TV (requires existing outlet on same wall)\n' +
   '- IMPORTANT: Base price is labor only. Mounts are NEVER included. Always an add-on.\n' +
-  '- TVs 65" or larger: You MUST confirm someone will help with the lift before proposing a time or submitting the job. If they say no one can help, say "Let me get Gabe on this for you" — do not proceed.\n' +
-  '- TVs 65" or larger: Ask about the lift like this: "Just a heads up - since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n\n' +
-  'WIRE CONCEALMENT:\n' +
-  '- Routes wires behind drywall to an existing outlet lower on the wall\n' +
-  '- If no outlet on the same wall, installing one costs +$150\n' +
-  '- We do NOT hide wires in brick walls\n\n' +
+  '- When quoting with a mount always ask "unless you have your own mount?" at the end.\n' +
+  '- We do NOT install new outlets. If no outlet on the wall, ask if they are flexible on TV placement.\n' +
+  '- TVs 65" or larger: Must confirm someone can help with the lift before booking.\n' +
+  '  Ask: "Just a heads up - since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n' +
+  '  If no one can help with lift: say "Let me get Gabe on this for you" and route to manual.\n\n' +
+  'TV SIZE IDENTIFICATION:\n' +
+  '- If customer does not know their TV size, say: "There\'s generally a serial, model and make white sticker on the back of the TV. If you\'re able to send that over or take a photo of it I can help you determine the size and which mount would work best!"\n' +
+  '- Use the model number to determine size category (under 65" = small, 65"+ = large)\n\n' +
   'SCHEDULING:\n' +
   '- Often same-day or next-day available\n' +
   '- Payment required to lock in appointment\n' +
-  '- Payment via Stripe link sent by text\n\n' +
+  '- Payment link sent via text after tech confirms\n\n' +
   'SERVICE AREA:\n' +
-  '- Kansas City metro: Lee\'s Summit, Overland Park, Olathe, Independence, Liberty, Gladstone, North KC and surrounding areas\n\n' +
+  '- KC metro: Lee\'s Summit, Overland Park, Olathe, Independence, Liberty, Gladstone, Blue Springs, North KC and surrounding areas\n\n' +
   'HOW LONG: About 1-1.5 hours per job\n\n' +
-  'GABE\'S STYLE: Casual, friendly, short sentences. "Amazing!", "Perfect!", "No worries!" Not corporate. Not a bot.';
+  'WHAT WE DO NOT OFFER:\n' +
+  '- Ceiling fan installation\n' +
+  '- Running HDMI cables through walls or ceiling\n' +
+  '- Electrical outlet installation\n' +
+  '- Any work that is not TV mounting or wire concealment\n' +
+  '- If asked about something we don\'t do, say: "That\'s not something we offer but we\'re happy to help with the TV mounting!"\n\n' +
+  'GABE\'S STYLE: Casual, friendly, short sentences. "Amazing!", "Perfect!", "No worries!" Not corporate. Not a bot. Never mention Walmart, Home Depot, or any store name to customers.';
 
 async function getHistory(phone) {
   try {
@@ -65,7 +72,7 @@ async function identifyCustomer(phone) {
     var normalized = phone.startsWith('+') ? phone : '+1' + phone.replace(/\D/g, '');
     var result = await supabase
       .from('jobs')
-      .select('id, customer_name, status, preferred_time, city, confirmed_tech_name, stripe_payment_link')
+      .select('id, customer_name, status, preferred_time, city, confirmed_tech_name, confirmed_tech_id, stripe_payment_link, num_tvs, total_price, tv_1_size, tv_1_mount, tv_1_wall, tv_1_wire')
       .or('customer_phone.eq.' + normalized)
       .not('status', 'in', '("cancelled","completed")')
       .order('created_at', { ascending: false })
@@ -75,10 +82,10 @@ async function identifyCustomer(phone) {
     }
     var past = await supabase
       .from('jobs')
-      .select('id, customer_name, status, preferred_time, city')
+      .select('id, customer_name, status, preferred_time, city, completed_at')
       .or('customer_phone.eq.' + normalized)
       .eq('status', 'completed')
-      .order('created_at', { ascending: false })
+      .order('completed_at', { ascending: false })
       .limit(1);
     if (past.data && past.data.length > 0) {
       return { type: 'returning', job: past.data[0] };
@@ -89,38 +96,130 @@ async function identifyCustomer(phone) {
   return { type: 'new', job: null };
 }
 
+async function findNextAvailableTime(requestedTime) {
+  var calendarModule = require('./service-calendar');
+  var isTimeAvailable = calendarModule.isTimeAvailable;
+  var attemptDateParse = calendarModule.attemptDateParse;
+
+  if (requestedTime) {
+    var parsed = attemptDateParse(requestedTime);
+    console.log('[Concierge] Requested time: "' + requestedTime + '" parsed to: ' + (parsed ? parsed.toISOString() : 'null'));
+    if (parsed && parsed > new Date()) {
+      var avail = false;
+      try { avail = await isTimeAvailable(parsed); } catch(e) {}
+      if (avail) {
+        var timeStr = parsed.toLocaleString('en-US', {
+          timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+          hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
+        });
+        return { time: parsed, label: timeStr, exact: true };
+      }
+    }
+  }
+
+  var now = new Date();
+  var candidate = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+  var minutes = candidate.getMinutes();
+  if (minutes < 30) {
+    candidate.setMinutes(30, 0, 0);
+  } else {
+    candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
+  }
+
+  for (var i = 0; i < 20; i++) {
+    try {
+      var available = await isTimeAvailable(candidate);
+      if (available) {
+        var label = candidate.toLocaleString('en-US', {
+          timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+          hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
+        });
+        return { time: candidate, label: label, exact: false };
+      }
+    } catch (err) {
+      console.error('[Concierge] Calendar check error:', err.message);
+      break;
+    }
+    candidate = new Date(candidate.getTime() + 30 * 60 * 1000);
+  }
+  return null;
+}
+
 function buildSystemPrompt(customerType, job, nextSlot) {
   var context = '';
+
   if (customerType === 'active' && job) {
-    context = 'This customer has an active job. Name: ' + job.customer_name + '. Status: ' + job.status + '. Time: ' + job.preferred_time + '. City: ' + job.city + '. If awaiting_payment, remind them their payment link was already sent.';
+    var isPrePayment = ['new','scheduling','awaiting_time_confirm','scheduling_conflict','tech_search','awaiting_tech_reply'].includes(job.status);
+    var isPostPayment = ['awaiting_payment','confirmed'].includes(job.status);
+
+    if (isPostPayment) {
+      context = 'ACTIVE JOB — POST BOOKING: This customer has an active job that is already booked.\n' +
+        'Name: ' + job.customer_name + '\n' +
+        'Status: ' + job.status + '\n' +
+        'Time: ' + job.preferred_time + '\n' +
+        'City: ' + job.city + '\n' +
+        'Tech: ' + (job.confirmed_tech_name || 'being assigned') + '\n\n' +
+        'POST-BOOKING CHANGE RULES:\n' +
+        '- If they want to ADD another TV: collect the new TV details (size, mount, wall, wire), calculate the add-on price, confirm with them, then alert Gabe to update the job and send a new invoice. Say: "Absolutely! Let me get the details for the additional TV and I\'ll update your booking right away."\n' +
+        '- If they want to ADD wire concealment: confirm the price (+$150), say you\'ll update the booking, alert Gabe.\n' +
+        '- If they want to change the TIME before tech arrives: collect new time, say "Let me check that for you!" and alert Gabe to reschedule.\n' +
+        '- If they ask about something we don\'t offer: decline gracefully.\n' +
+        '- For ANY job change: after collecting details, say "Let me sort that out for you and I\'ll be right back with you!" then alert Gabe.\n' +
+        '- If payment is pending, remind them their payment link was already sent.\n';
+    } else {
+      context = 'ACTIVE JOB — PRE-BOOKING: This customer has a job in progress but not yet confirmed.\n' +
+        'Name: ' + job.customer_name + '\n' +
+        'Status: ' + job.status + '\n' +
+        'Time: ' + job.preferred_time + '\n' +
+        'City: ' + job.city + '\n' +
+        'Respond based on where they are in the process.\n';
+    }
   } else if (customerType === 'returning' && job) {
-    context = 'Returning customer. Name: ' + job.customer_name + '. Had a job in ' + job.city + ' on ' + job.preferred_time + '. Greet them warmly.';
+    context = 'RETURNING CUSTOMER: Been with us before.\n' +
+      'Name: ' + job.customer_name + '\n' +
+      'Previous job: ' + job.city + ', ' + job.preferred_time + '\n' +
+      'Greet them warmly by name and reference their previous experience.\n';
   } else {
-    context = 'New customer. On the VERY FIRST message, introduce yourself as Gabe from Kansas City TV Mounting, thank them for reaching out, always ask for their name like this: "Do you mind if I grab your name?" — never "What\'s your name?" or "May I ask your name?", and answer their question — all in the same message. Then ask about the wall type but phrase it in a friendly way that helps them understand — say something like "Do you know what type of wall you\'re mounting to? Is it a normal wall like drywall or is it brick?" — never just say "what type of wall?" cold. If they respond without giving their name, keep gently asking each time until you get it — vary the phrasing so it doesn\'t sound robotic. Once you have their name use it naturally throughout. If they want to book, collect: number of TVs, size, mount type, wall type, wire concealment, city, preferred time.';
+    context = 'NEW CUSTOMER:\n' +
+      'On the VERY FIRST message, introduce yourself as Gabe from Kansas City TV Mounting, thank them for reaching out, ask for their name like "Do you mind if I grab your name?" AND answer their question — all in one message.\n' +
+      'When asking about wall type, phrase it helpfully: "Do you know what type of wall you\'re mounting to? Is it a normal wall like drywall or is it brick?"\n' +
+      'Keep asking for their name politely until you get it — vary the phrasing each time.\n' +
+      'Once you have their name use it naturally.\n' +
+      'Collect all details to book: number of TVs, size in inches, mount type, wall type, wire concealment, city, preferred time.\n' +
+      'For EACH TV collect ALL four: size, mount, wall, wire concealment — never skip any.\n';
   }
-  return 'You are texting for Kansas City TV Mounting (KCTVM) on behalf of Gabe. Keep replies short — this is SMS. Sound like a real person, not a bot. Never say you are AI.\n\n' +
-    context + '\n\n' +
+
+  var slotInstruction = '';
+  if (nextSlot) {
+    if (nextSlot.exact) {
+      slotInstruction = 'TIME CONFIRMED: The customer\'s requested time is available. Say: "That\'ll work! I\'ll put you down for ' + nextSlot.label + ' in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n';
+    } else {
+      slotInstruction = 'EARLIEST AVAILABLE: The next open slot is ' + nextSlot.label + '. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
+    }
+  }
+
+  return 'You are texting for Kansas City TV Mounting (KCTVM) on behalf of Gabe. Keep replies short — this is SMS, max 2-3 sentences. Sound like a real person, not a bot. Never say you are AI.\n\n' +
+    context + '\n' +
+    slotInstruction + '\n' +
     KNOWLEDGE_BASE + '\n\n' +
-    'SCHEDULING — READ THIS CAREFULLY:\n' +
-    '"Soonest", "earliest", "today", "asap", "as soon as possible" ALL mean: check the calendar and find the next available slot at least 4 hours from right now. You already have this time in nextSlot. PROPOSE IT IN YOUR RESPONSE. Do not ask when they want to come. Do not say you will check. You have already checked. Just say the time.\n' +
-    'For EACH TV, always collect ALL four details before moving on: (1) size in inches, (2) mount type — do they have one or need fixed/articulating, (3) wall type — drywall or brick, (4) wire concealment — yes or no. Never skip wire concealment even if you already asked about mount and wall. Ask about all four for every TV added.\n' +
-    'NEVER suggest or propose a time unless the customer has told you a specific time or said "soonest/earliest/asap/today". If they have not mentioned a time yet, just ask: "What day and time works best for you?"\n' +
-    'CRITICAL TIME RESPONSE RULES:\n' +
-    '1. If the customer requested a SPECIFIC time and that time IS available: immediately say "That\'ll work! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" — do NOT ask if it works, do NOT say "I see we have an opening", just confirm it.\n' +
-    '2. If you are proposing the EARLIEST available time they did not request: say "I see we have an opening at [time] — does that work for you?"\n' +
-    '3. Never mix these two cases up.\n' +
-    'When customer confirms a time, say: "Amazing! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" Then stop.\n' +
-    'Only submit the job AFTER the customer says yes to a specific time you proposed.\n' +
-    (nextSlot ? '- The next available time slot is ' + nextSlot.label + '. You MUST say this time in your reply RIGHT NOW.\n' : '- No calendar slot available yet — ask what time of day works best.\n') +
-    'NEVER assume, guess, or substitute a city. Use ONLY the exact city the customer stated word for word. If the customer said "Blue Springs" always say "Blue Springs" — never substitute Lee\'s Summit, Overland Park, or any other city. Read back the city from the conversation history carefully before confirming.\n' +
-    '- A time followed by a question mark (e.g. "7pm?") means they are asking if 7pm works — treat it the same as "7pm".\n\n' +
-    'CONVERSATION RULES:\n' +
-    '- Do NOT mention Stripe, payment links, or locking in until AFTER the job is confirmed and the customer has agreed. Never bring it up during the booking conversation.\n' +
-    '- Do NOT info dump. Answer only what the customer asked. One or two questions max per message.\n' +
-    '- Never mention Walmart, Home Depot, or any store name to customers. Ever.\n' +
-    'Only say "Let me get Gabe on this" for genuine legal/liability issues — absolute last resort.\n' +
-    'CRITICAL: Your response is sent DIRECTLY as an SMS text message to a real customer. Do NOT include ANY of the following: asterisks, bullet points, brackets, internal notes, job summaries, or descriptions of what you are doing. No **bold**, no - lists, no [brackets], no *asterisks*. Just plain conversational text like a real person would text. Violating this rule will embarrass the business.\n' +
-    'When you have a nextSlot time, say it directly in your message. Do not say "I will check and get back to you" — you already have the time, just say it.\n';
+    'SCHEDULING RULES:\n' +
+    'NEVER suggest or propose a time unless the customer has told you a specific time or said soonest/earliest/asap/today. If they have not mentioned a time, just ask: "What day and time works best for you?"\n' +
+    'NEVER assume a city — use ONLY the exact city the customer stated in this conversation. Read it carefully from the history before confirming.\n' +
+    'CRITICAL TIME RULES:\n' +
+    '1. Customer requested specific time and it IS available: say "That\'ll work! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n' +
+    '2. Proposing earliest available time: say "I see we have an opening at [time] — does that work for you?"\n' +
+    '3. When customer confirms earliest time: say "Amazing! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n\n' +
+    'CRITICAL SMS RULES:\n' +
+    'Your response is sent DIRECTLY as an SMS. No asterisks, no bullet points, no brackets, no bold, no internal notes, no job summaries. Plain conversational text only. Never write anything between ** or [] or - lists.\n' +
+    'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
+}
+
+async function alertOwnerForJobChange(from, body, job, changeType) {
+  if (shouldAlertOwner('job_change:' + from + ':' + changeType)) {
+    await sendSMS(OWNER_PHONE,
+      '📱 JOB CHANGE NEEDED\nCustomer: ' + (job ? job.customer_name : 'unknown') + '\nPhone: ' + from + '\nJob: ' + (job ? job.preferred_time + ' in ' + job.city : 'unknown') + '\nRequest: ' + body
+    );
+  }
 }
 
 var followUpTimers = new Map();
@@ -131,7 +230,7 @@ async function scheduleFollowUp(phone, msg) {
   try {
     var check = await supabase.from('follow_up_sent').select('phone').eq('phone', phone).single();
     if (check.data) return;
-  } catch (e) { /* not found, continue */ }
+  } catch (e) {}
   if (followUpTimers.has(phone)) clearTimeout(followUpTimers.get(phone));
   var timer = setTimeout(async function() {
     followUpTimers.delete(phone);
@@ -150,62 +249,50 @@ async function scheduleFollowUp(phone, msg) {
   followUpTimers.set(phone, timer);
 }
 
-async function findNextAvailableTime(requestedTime) {
-  const { isTimeAvailable, attemptDateParse } = require('./service-calendar');
+async function checkAndCreateJob(phone, history) {
+  if (history.length < 2) return false;
+  var conversationText = history.map(function(m) {
+    return (m.role === 'user' ? 'Customer' : 'KCTVM') + ': ' + m.content;
+  }).join('\n');
 
-  // If customer requested a specific time, check that first
-  if (requestedTime) {
-    const parsed = attemptDateParse(requestedTime);
-    if (parsed && parsed > new Date()) {
-      console.log('[Concierge] Requested time: "' + requestedTime + '" parsed to: ' + (parsed ? parsed.toISOString() : 'null'));
-      const available = await isTimeAvailable(parsed).catch(() => false);
-      if (available) {
-        const timeStr = parsed.toLocaleString('en-US', {
-          timeZone: 'America/Chicago',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-          weekday: 'short',
-          month: 'numeric',
-          day: 'numeric'
-        });
-        return { time: parsed, label: timeStr };
-      }
+  var extractPrompt = 'Given this SMS conversation, determine if we have COMPLETE booking details.\n' +
+    'Required: customer name, city, confirmed preferred time, number of TVs, TV size, mount type, wall type, wire concealment, total price.\n\n' +
+    'Conversation:\n' + conversationText + '\n\n' +
+    'If ALL details are present and customer confirmed a specific time AND agreed to the price, respond with JSON only:\n' +
+    '{"ready":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
+    'tv_1_inches: use actual inch number from conversation. Under 65=small, 65+=large. Unknown small=52, unknown large=75.\n' +
+    'If not complete: {"ready":false}\n' +
+    'JSON only, no other text.';
+
+  try {
+    var r = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 400,
+      messages: [{ role: 'user', content: extractPrompt }]
+    });
+    var text = r.content[0].text.trim().replace(/```json|```/g, '');
+    var data = JSON.parse(text);
+    if (!data.ready) return false;
+
+    // Block vague times
+    var hasSpecificTime = data.preferred_time && data.preferred_time.match(/\d{1,2}(:\d{2})?\s*(am|pm)/i);
+    var vagueTerms = ['soonest', 'earliest', 'asap', 'as soon as', 'requesting', 'available'];
+    if (!hasSpecificTime && data.preferred_time && vagueTerms.some(function(t) { return data.preferred_time.toLowerCase().includes(t); })) {
+      console.log('[Concierge] Blocked job submission — time not confirmed yet: ' + data.preferred_time);
+      return false;
     }
-  }
 
-  // Otherwise find next available slot 4+ hours from now
-  const now = new Date();
-  let candidate = new Date(now.getTime() + 4 * 60 * 60 * 1000);
-  const minutes = candidate.getMinutes();
-  if (minutes < 30) {
-    candidate.setMinutes(30, 0, 0);
-  } else {
-    candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
+    var payload = Object.assign({}, data, { phone: phone });
+    delete payload.ready;
+    await axios.post(process.env.BASE_URL + '/webhook/quote', payload, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    console.log('[Concierge] Job created for ' + phone);
+    return true;
+  } catch (err) {
+    console.error('[Concierge] checkAndCreateJob error:', err.message);
+    return false;
   }
-
-  for (let i = 0; i < 20; i++) {
-    try {
-      const available = await isTimeAvailable(candidate);
-      if (available) {
-        const timeStr = candidate.toLocaleString('en-US', {
-          timeZone: 'America/Chicago',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-          weekday: 'short',
-          month: 'numeric',
-          day: 'numeric'
-        });
-        return { time: candidate, label: timeStr };
-      }
-    } catch (err) {
-      console.error('[Concierge] Calendar check error:', err.message);
-      break;
-    }
-    candidate = new Date(candidate.getTime() + 30 * 60 * 1000);
-  }
-  return null;
 }
 
 async function handleConciergeMessage(from, body) {
@@ -214,99 +301,87 @@ async function handleConciergeMessage(from, body) {
     var info = await identifyCustomer(from);
     console.log('[Concierge] Customer type: ' + info.type);
 
-    // If conversation has all details and customer asked for soonest time, check calendar
     var history = await getHistory(from);
     var msgLower = body.toLowerCase();
-    var wantsEarliestTime = msgLower.includes('soonest') || msgLower.includes('earliest') || msgLower.includes('asap') || msgLower.includes('today') || msgLower.includes('as soon as') ||
+
+    // Detect job change requests for post-booking customers
+    var isJobChange = info.type === 'active' && info.job &&
+      ['awaiting_payment','confirmed'].includes(info.job.status) &&
+      (msgLower.includes('add') || msgLower.includes('change') || msgLower.includes('reschedule') ||
+       msgLower.includes('earlier') || msgLower.includes('later') || msgLower.includes('different time') ||
+       msgLower.includes('another tv') || msgLower.includes('wire') || msgLower.includes('conceal'));
+
+    // Calendar check
+    var wantsEarliestTime = msgLower.includes('soonest') || msgLower.includes('earliest') || msgLower.includes('asap') || msgLower.includes('as soon as') ||
       history.some(function(m) { return m.role === 'user' && (m.content.toLowerCase().includes('soonest') || m.content.toLowerCase().includes('earliest') || m.content.toLowerCase().includes('asap')); });
     var nextSlot = null;
-    var hasCity = history.some(function(m) { return m.role === 'user' && (m.content.toLowerCase().includes('springs') || m.content.toLowerCase().includes('city') || m.content.toLowerCase().includes('kansas') || m.content.toLowerCase().includes('overland') || m.content.toLowerCase().includes('summit') || m.content.toLowerCase().includes('olathe') || m.content.toLowerCase().includes('independence') || m.content.toLowerCase().includes('liberty') || m.content.toLowerCase().includes('gladstone') || m.content.toLowerCase().includes('independence')); });
-    // Check if customer mentioned a specific time
-    var specificTimeMatch = body.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
-    var requestedTime = specificTimeMatch ? body : null;
-    if ((wantsEarliestTime || requestedTime) && hasCity && history.length >= 2) {
+    var cityKeywords = ['springs', 'kansas city', 'overland', 'summit', 'olathe', 'independence', 'liberty', 'gladstone', 'lees', "lee's", 'belton', 'raymore', 'grandview', 'raytown', 'excelsior', 'parkville', 'riverside'];
+    var allText = body.toLowerCase() + ' ' + history.map(function(m) { return m.content.toLowerCase(); }).join(' ');
+    var hasCity = cityKeywords.some(function(k) { return allText.includes(k); });
+    var specificTimeMatch = body.match(/\d{1,2}(:\d{2})?\s*(am|pm)/i);
+    var dayMatch = body.match(/\b(tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+    var requestedTime = (specificTimeMatch || dayMatch) ? body : null;
+    if (wantsEarliestTime && hasCity) {
+      nextSlot = await findNextAvailableTime(null);
+    } else if (requestedTime && hasCity) {
       nextSlot = await findNextAvailableTime(requestedTime);
     }
 
     var messages = history.slice(-10).concat([{ role: 'user', content: body }]);
     var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
+
     var response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 300,
       system: systemPrompt,
       messages: messages
     });
+
     var reply = response.content[0].text.trim();
     console.log('[Concierge] Reply: "' + reply + '"');
+
     await addToHistory(from, 'user', body);
     await addToHistory(from, 'assistant', reply);
+
+    // Alert owner for job changes
+    if (isJobChange) {
+      await alertOwnerForJobChange(from, body, info.job, 'change');
+    }
+
+    // Alert owner for manual escalation
     if (reply.toLowerCase().indexOf('let me get gabe') !== -1) {
       if (shouldAlertOwner('manual:' + from)) {
         await sendSMS(OWNER_PHONE, 'MANUAL NEEDED\nFrom: ' + from + '\nMsg: ' + body);
       }
     }
-    var updatedHistory = await getHistory(from);
-    var confirmedWords = ["that'll work", "that works", "yes", "perfect", "sounds good", "great", "yep", "sure", "ok", "okay", "works for me", "let's do it", "do it"];
-    var customerConfirmed = confirmedWords.some(function(w) { return msgLower.includes(w); });
-    var hasConfirmedTime = customerConfirmed || updatedHistory.some(function(m) {
-      return m.role === 'user' && m.content.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
-    });
-    var jobCreated = hasConfirmedTime ? await checkAndCreateJob(from, updatedHistory) : false;
-    // Always send the reply — job creation runs in background
+
+    // Send reply
     await sendSMS(from, reply);
+
+    // Try to create job if new customer with all details
+    if (info.type === 'new' || (info.type === 'active' && ['awaiting_time_confirm','scheduling_conflict'].includes(info.job ? info.job.status : ''))) {
+      var confirmedWords = ["that'll work", "that works", "yes", "perfect", "sounds good", "great", "yep", "sure", "ok", "okay", "works for me", "let's do it", "do it", "amazing", "awesome"];
+      var customerConfirmed = confirmedWords.some(function(w) { return msgLower.includes(w); });
+      var hasSpecificTimeInHistory = customerConfirmed || history.concat([{role:'user',content:body}]).some(function(m) {
+        return m.role === 'user' && m.content.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
+      });
+      if (hasSpecificTimeInHistory) {
+        var updatedHistory = await getHistory(from);
+        await checkAndCreateJob(from, updatedHistory.concat([{role:'user',content:body},{role:'assistant',content:reply}]));
+      }
+    }
+
     await scheduleFollowUp(from, body);
+
   } catch (err) {
-    console.error('[Concierge] Error:', err.message);
+    console.error('[Concierge] Error:', err.message, err.stack);
     if (shouldAlertOwner('error:' + from)) {
       await sendSMS(OWNER_PHONE, 'CONCIERGE ERROR\nFrom: ' + from + '\n' + err.message);
     }
     try {
       await sendSMS(from, 'Hey! Thanks for reaching out to Kansas City TV Mounting. We\'ll get back to you shortly!');
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
   }
-}
-
-async function checkAndCreateJob(phone, history) {
-  if (history.length < 2) return;
-  var conversationText = history.map(function(m) {
-    return (m.role === 'user' ? 'Customer' : 'KCTVM') + ': ' + m.content;
-  }).join('\n');
-  var prompt = 'Given this SMS conversation, determine if we have COMPLETE booking details.\n' +
-    'Required: customer name or just use "Customer", city, preferred time, number of TVs, TV size (small=under65 or large=65plus), mount type (yes/fixed/articulating), wall type (drywall/brick), wire concealment (no/cable), total price.\n\n' +
-    'Conversation:\n' + conversationText + '\n\n' +
-    'If ALL details are present and customer confirmed the price, respond with JSON only:\n' +
-    '{"ready":true,"name":"Customer","city":"city","preferred_time":"time","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
-    'tv_1_inches rules: under 65" = small, 65"+ = large. Use the actual inch number from the conversation. If they said 76" use 76. If they said 55" use 55. If unknown but small use 52, if unknown but large use 75.\n' +
-    'If not complete yet: {"ready":false}\n' +
-    'JSON only, no other text.';
-  try {
-    var r = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 400,
-      messages: [{ role: 'user', content: prompt }]
-    });
-    var text = r.content[0].text.trim().replace(/```json|```/g, '');
-    var data = JSON.parse(text);
-    if (data.ready) {
-      // Never submit a job with a vague time
-      var vagueTerms = ['soonest', 'earliest', 'asap', 'as soon as', 'requesting', 'available'];
-      var hasSpecificTime = data.preferred_time && data.preferred_time.match(/\d{1,2}(:\d{2})?\s*(am|pm)/i);
-      if (!hasSpecificTime && data.preferred_time && vagueTerms.some(function(t) { return data.preferred_time.toLowerCase().includes(t); })) {
-        console.log('[Concierge] Blocked job submission — time not confirmed yet: ' + data.preferred_time);
-        return false;
-      }
-      data.phone = phone;
-      delete data.ready;
-      await axios.post(process.env.BASE_URL + '/webhook/quote', data, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-      console.log('[Concierge] Job created for ' + phone);
-      return true;
-    }
-  } catch (err) {
-    console.error('[Concierge] checkAndCreateJob error:', err.message);
-  }
-  return false;
 }
 
 module.exports = { handleConciergeMessage };
