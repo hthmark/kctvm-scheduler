@@ -274,7 +274,8 @@ async function checkAndCreateJob(phone, history) {
     'Required: customer name or just use "Customer", city, preferred time, number of TVs, TV size (small=under65 or large=65plus), mount type (yes/fixed/articulating), wall type (drywall/brick), wire concealment (no/cable), total price.\n\n' +
     'Conversation:\n' + conversationText + '\n\n' +
     'If ALL details are present and customer confirmed the price, respond with JSON only:\n' +
-    '{"ready":true,"name":"Customer","city":"city","preferred_time":"time","num_tvs":1,"total_price":200,"tv_1_size":"small","tv_1_mount":"fixed","tv_1_wall":"drywall","tv_1_wire":"no"}\n' +
+    '{"ready":true,"name":"Customer","city":"city","preferred_time":"time","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
+    'tv_1_inches rules: under 65" = small, 65"+ = large. Use the actual inch number from the conversation. If they said 76" use 76. If they said 55" use 55. If unknown but small use 52, if unknown but large use 75.\n' +
     'If not complete yet: {"ready":false}\n' +
     'JSON only, no other text.';
   try {
