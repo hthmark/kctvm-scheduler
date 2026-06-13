@@ -103,6 +103,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     KNOWLEDGE_BASE + '\n\n' +
     'SCHEDULING — READ THIS CAREFULLY:\n' +
     '"Soonest", "earliest", "today", "asap", "as soon as possible" ALL mean: check the calendar and find the next available slot at least 4 hours from right now. You already have this time in nextSlot. PROPOSE IT IN YOUR RESPONSE. Do not ask when they want to come. Do not say you will check. You have already checked. Just say the time.\n' +
+    'NEVER suggest or propose a time unless the customer has told you a specific time or said "soonest/earliest/asap/today". If they have not mentioned a time yet, just ask: "What day and time works best for you?"\n' +
     'CRITICAL TIME RESPONSE RULES:\n' +
     '1. If the customer requested a SPECIFIC time and that time IS available: immediately say "We sure do! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" — do NOT ask if it works, do NOT say "I see we have an opening", just confirm it.\n' +
     '2. If you are proposing the EARLIEST available time they did not request: say "I see we have an opening at [time] — does that work for you?"\n' +
