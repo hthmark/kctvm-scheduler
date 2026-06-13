@@ -125,6 +125,24 @@ async function findNextAvailableTime(requestedTime) {
   } else {
     candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
   }
+  // Enforce business hours 8am-7pm KC time
+  var checkHour = function(d) {
+    var h = parseInt(d.toLocaleString('en-US', {timeZone:'America/Chicago',hour:'numeric',hour12:false}));
+    return h;
+  };
+  var safetyCount = 0;
+  while (safetyCount++ < 48) {
+    var hour = checkHour(candidate);
+    if (hour >= 7 && hour < 19) break;
+    if (hour >= 19) {
+      candidate.setDate(candidate.getDate() + 1);
+      candidate.setHours(8, 0, 0, 0);
+      var chicagoMidnight = new Date(candidate.toLocaleString('en-US', {timeZone:'America/Chicago'}));
+      candidate = new Date(candidate.getTime() + (candidate - chicagoMidnight));
+    } else {
+      candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
+    }
+  }
 
   for (var i = 0; i < 20; i++) {
     try {
@@ -384,9 +402,9 @@ async function handleConciergeMessage(from, body) {
 
     // Try to create job if new customer with all details
     if (info.type === 'new' || (info.type === 'active' && ['awaiting_time_confirm','scheduling_conflict'].includes(info.job ? info.job.status : ''))) {
-      var confirmedWords = ["that'll work", "that works", "yes", "perfect", "sounds good", "great", "yep", "sure", "ok", "okay", "works for me", "let's do it", "do it", "amazing", "awesome"];
+      var confirmedWords = ["that'll work", "that works", "yes", "perfect", "sounds good", "great", "yep", "sure", "ok", "okay", "works for me", "let's do it", "do it", "amazing", "awesome", "confirmed", "book it", "let's do", "that work", "works"];
       var customerConfirmed = confirmedWords.some(function(w) { return msgLower.includes(w); });
-      var hasSpecificTimeInHistory = customerConfirmed || history.concat([{role:'user',content:body}]).some(function(m) {
+      var hasSpecificTimeInHistory = customerConfirmed || history.concat([{role:'user',content:body},{role:'assistant',content:reply}]).some(function(m) {
         return m.role === 'user' && m.content.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
       });
       if (hasSpecificTimeInHistory) {
