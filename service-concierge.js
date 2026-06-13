@@ -289,8 +289,9 @@ async function checkAndCreateJob(phone, history) {
     var data = JSON.parse(text);
     if (data.ready) {
       // Never submit a job with a vague time
-      var vagueTerms = ['soonest', 'earliest', 'asap', 'as soon as', 'today', 'requesting'];
-      if (data.preferred_time && vagueTerms.some(function(t) { return data.preferred_time.toLowerCase().includes(t); })) {
+      var vagueTerms = ['soonest', 'earliest', 'asap', 'as soon as', 'requesting', 'available'];
+      var hasSpecificTime = data.preferred_time && data.preferred_time.match(/\d{1,2}(:\d{2})?\s*(am|pm)/i);
+      if (!hasSpecificTime && data.preferred_time && vagueTerms.some(function(t) { return data.preferred_time.toLowerCase().includes(t); })) {
         console.log('[Concierge] Blocked job submission — time not confirmed yet: ' + data.preferred_time);
         return false;
       }
