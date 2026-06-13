@@ -41,6 +41,26 @@ function attemptDateParse(str) {
 
   let target = new Date(today);
 
+  // Handle "Sun, 6/14, 8:00 AM" format from concierge slot labels
+  var slotMatch = input.match(/(\d{1,2})\/(\d{1,2}),?\s*(\d{1,2}):?(\d{2})?\s*(am|pm)/i);
+  if (slotMatch) {
+    var month = parseInt(slotMatch[1]) - 1;
+    var day = parseInt(slotMatch[2]);
+    var slotHour = parseInt(slotMatch[3]);
+    var slotMin = slotMatch[4] ? parseInt(slotMatch[4]) : 0;
+    var slotAmpm = slotMatch[5].toLowerCase();
+    if (slotAmpm === 'pm' && slotHour !== 12) slotHour += 12;
+    if (slotAmpm === 'am' && slotHour === 12) slotHour = 0;
+    var slotYear = new Date().getFullYear();
+    var slotDate = new Date(slotYear, month, day, slotHour, slotMin, 0, 0);
+    var slotOffset = new Date(slotDate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    var slotUtc = new Date(slotDate.getTime() + (slotDate - slotOffset));
+    if (slotUtc > new Date()) {
+      console.log('[Calendar] Parsed slot label "' + str + '" → ' + slotUtc.toISOString());
+      return slotUtc;
+    }
+  }
+
   if (input.includes('tomorrow')) {
     target.setDate(target.getDate() + 1);
   } else if (!input.includes('today')) {
