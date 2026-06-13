@@ -112,7 +112,7 @@ async function findNextAvailableTime(requestedTime) {
           timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
           hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
         });
-        return { time: parsed, label: timeStr, exact: true };
+        return { time: parsed, label: timeStr, raw: parsed.toISOString(), exact: true };
       }
     }
   }
@@ -160,7 +160,7 @@ async function findNextAvailableTime(requestedTime) {
           timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
           hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
         });
-        return { time: candidate, label: label, exact: false };
+        return { time: candidate, label: label, raw: candidate.toISOString(), exact: false };
       }
     } catch (err) {
       console.error('[Concierge] Calendar check error:', err.message);
@@ -218,9 +218,9 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   var slotInstruction = '';
   if (nextSlot) {
     if (nextSlot.exact) {
-      slotInstruction = 'TIME CONFIRMED: The customer\'s requested time is available. Say: "That\'ll work! I\'ll put you down for ' + nextSlot.label + ' in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n';
+      slotInstruction = 'TIME CONFIRMED: slot ISO time is ' + nextSlot.raw + ' — use this as preferred_time in job submission. Say: "That\'ll work! I\'ll put you down for ' + nextSlot.label + ' in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n';
     } else {
-      slotInstruction = 'EARLIEST AVAILABLE: The next open slot is ' + nextSlot.label + '. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
+      slotInstruction = 'EARLIEST AVAILABLE: slot ISO time is ' + nextSlot.raw + ' — use this as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
   }
 

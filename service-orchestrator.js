@@ -94,8 +94,8 @@ async function processNewJob(job) {
       const { outOfRangeTVs } = buildSupplyList(job);
       if (outOfRangeTVs.length > 0) {
         const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum}`).join(', ');
-        await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. For ${tvNums}, we'll need to order a custom mount online which takes about 2 days. Would it work to push your appointment back 2 days? Just reply Yes to confirm or suggest another time.`);
         await updateJob(job.id, { status: 'awaiting_time_confirm' });
+        console.log(`[Orchestrator] Job ${job.id} awaiting time confirm — no automated text sent, concierge handles this`);
         return;
       }
       await dispatchToNextTech(job.id);
@@ -110,7 +110,7 @@ async function processNewJob(job) {
     }
   } else {
     await updateJob(job.id, { status: 'awaiting_time_confirm' });
-    await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}! This is Kansas City TV Mounting. Thanks for your quote request! What specific date and time works best? (Example: "Saturday June 14 at 2pm")`);
+    console.log(`[Orchestrator] Job ${job.id} awaiting time confirm — no automated text sent, concierge handles this`);
     // Schedule follow-up if no response in 3 hours
     setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
   }
