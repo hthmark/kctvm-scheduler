@@ -125,22 +125,30 @@ async function findNextAvailableTime(requestedTime) {
   } else {
     candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
   }
-  // Enforce business hours 8am-7pm KC time
-  var checkHour = function(d) {
-    var h = parseInt(d.toLocaleString('en-US', {timeZone:'America/Chicago',hour:'numeric',hour12:false}));
+  // Enforce business hours 8am-7pm KC time, 7 days a week
+  var getChicagoHour = function(d) {
+    var str = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: true });
+    var match = str.match(/(\d+):?(\d*)\s*(AM|PM)/i);
+    if (!match) return 12;
+    var h = parseInt(match[1]);
+    var ampm = match[3].toUpperCase();
+    if (ampm === 'PM' && h !== 12) h += 12;
+    if (ampm === 'AM' && h === 12) h = 0;
     return h;
   };
   var safetyCount = 0;
   while (safetyCount++ < 48) {
-    var hour = checkHour(candidate);
-    if (hour >= 7 && hour < 19) break;
-    if (hour >= 19) {
-      candidate.setDate(candidate.getDate() + 1);
-      candidate.setHours(8, 0, 0, 0);
-      var chicagoMidnight = new Date(candidate.toLocaleString('en-US', {timeZone:'America/Chicago'}));
-      candidate = new Date(candidate.getTime() + (candidate - chicagoMidnight));
-    } else {
-      candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
+    var hour = getChicagoHour(candidate);
+    if (hour >= 8 && hour < 19) break;
+    if (hour >= 19 || hour < 8) {
+      // Move to next day 8am KC time
+      var nextDay = new Date(candidate);
+      nextDay.setDate(nextDay.getDate() + (hour >= 19 ? 1 : 0));
+      var dateStr = nextDay.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+      var parts = dateStr.split('/');
+      candidate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), 8, 0, 0, 0);
+      var offset = new Date(candidate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+      candidate = new Date(candidate.getTime() + (candidate - offset));
     }
   }
 
