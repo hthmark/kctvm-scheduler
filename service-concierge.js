@@ -103,8 +103,10 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     KNOWLEDGE_BASE + '\n\n' +
     'SCHEDULING — READ THIS CAREFULLY:\n' +
     '"Soonest", "earliest", "today", "asap", "as soon as possible" ALL mean: check the calendar and find the next available slot at least 4 hours from right now. You already have this time in nextSlot. PROPOSE IT IN YOUR RESPONSE. Do not ask when they want to come. Do not say you will check. You have already checked. Just say the time.\n' +
-    'If the customer requested a SPECIFIC time and it is available, say: "We sure do! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n' +
-    'If you are proposing a time they did NOT request (earliest available), say: "I see we have an opening at [time] — does that work for you?"\n' +
+    'CRITICAL TIME RESPONSE RULES:\n' +
+    '1. If the customer requested a SPECIFIC time and that time IS available: immediately say "We sure do! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" — do NOT ask if it works, do NOT say "I see we have an opening", just confirm it.\n' +
+    '2. If you are proposing the EARLIEST available time they did not request: say "I see we have an opening at [time] — does that work for you?"\n' +
+    '3. Never mix these two cases up.\n' +
     'When customer confirms a time, say: "Amazing! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" Then stop.\n' +
     'Only submit the job AFTER the customer says yes to a specific time you proposed.\n' +
     (nextSlot ? '- The next available time slot is ' + nextSlot.label + '. You MUST say this time in your reply RIGHT NOW.\n' : '- No calendar slot available yet — ask what time of day works best.\n') +
