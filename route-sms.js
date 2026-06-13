@@ -35,6 +35,7 @@ router.post('/inbound', async (req, res) => {
   try {
     const { from, body, mediaUrls } = parseInbound(req);
     if (!from) return;
+    if (from === '+18162032001' || from === process.env.TELNYX_PHONE_NUMBER) return;
     const normalizedFrom = from.replace(/\D/g, '');
     const bodyLower = (body || '').toLowerCase().trim();
     console.log(`[SMS Inbound] From: ${from} | Body: "${body}" | Media: ${mediaUrls.length} files`);

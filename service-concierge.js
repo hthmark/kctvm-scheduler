@@ -218,9 +218,9 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   var slotInstruction = '';
   if (nextSlot) {
     if (nextSlot.exact) {
-      slotInstruction = 'TIME CONFIRMED: slot ISO time is ' + nextSlot.raw + ' — use this as preferred_time in job submission. Say: "That\'ll work! I\'ll put you down for ' + nextSlot.label + ' in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n';
+      slotInstruction = 'TIME CONFIRMED: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "That\'ll work! I\'ll put you down for ' + nextSlot.label + ' in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n';
     } else {
-      slotInstruction = 'EARLIEST AVAILABLE: slot ISO time is ' + nextSlot.raw + ' — use this as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
+      slotInstruction = 'EARLIEST AVAILABLE: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
   }
 
