@@ -214,11 +214,35 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
 }
 
-async function alertOwnerForJobChange(from, body, job, changeType) {
-  if (shouldAlertOwner('job_change:' + from + ':' + changeType)) {
-    await sendSMS(OWNER_PHONE,
-      '📱 JOB CHANGE NEEDED\nCustomer: ' + (job ? job.customer_name : 'unknown') + '\nPhone: ' + from + '\nJob: ' + (job ? job.preferred_time + ' in ' + job.city : 'unknown') + '\nRequest: ' + body
-    );
+async function handlePostBookingChange(from, body, job, reply) {
+  var msgLower = body.toLowerCase();
+  var jobChange = require('./service-jobchange');
+
+  // Reschedule request
+  var isReschedule = msgLower.includes('reschedule') || msgLower.includes('different time') ||
+    msgLower.includes('earlier') || msgLower.includes('later') ||
+    msgLower.includes('change') && (msgLower.includes('time') || msgLower.includes('day'));
+  var timeMatch = body.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
+
+  if (isReschedule && timeMatch) {
+    await jobChange.handleReschedule(job.id, from, body);
+    return;
+  }
+
+  // Removal request — route to Gabe
+  var isRemoval = (msgLower.includes('remove') || msgLower.includes('cancel') || msgLower.includes('skip') || msgLower.includes('without') || msgLower.includes('dont need') || msgLower.includes("don't need")) &&
+    (msgLower.includes('wire') || msgLower.includes('mount') || msgLower.includes('tv'));
+  if (isRemoval) {
+    if (shouldAlertOwner('removal:' + from)) {
+      await sendSMS(OWNER_PHONE, '📱 REMOVAL NEEDED\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + job.preferred_time + ' in ' + job.city + '\nRequest: ' + body);
+    }
+    return;
+  }
+
+  // Add-on — collect details via Claude then process
+  // For now alert Gabe — the concierge handles the conversation, then alerts
+  if (shouldAlertOwner('addon:' + from)) {
+    await sendSMS(OWNER_PHONE, '📱 ADD-ON NEEDED\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + job.preferred_time + ' in ' + job.city + '\nRequest: ' + body);
   }
 }
 
@@ -343,9 +367,9 @@ async function handleConciergeMessage(from, body) {
     await addToHistory(from, 'user', body);
     await addToHistory(from, 'assistant', reply);
 
-    // Alert owner for job changes
+    // Handle post-booking changes automatically
     if (isJobChange) {
-      await alertOwnerForJobChange(from, body, info.job, 'change');
+      await handlePostBookingChange(from, body, info.job, reply);
     }
 
     // Alert owner for manual escalation
