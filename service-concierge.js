@@ -16,6 +16,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Each additional TV under 65": $70\n' +
   '- Each additional TV 65"+: $80\n' +
   '- Fixed mount add-on (we source the mount): +$60\n' +
+  '- When quoting with a mount, always ask "unless you have your own mount?" at the end — never assume they need one.\n' +
   '- Articulating/full motion mount add-on (we source the mount): +$120\n' +
   '- Brick wall: +$150 per TV\n' +
   '- Wire/cable concealment: +$150 per TV (requires existing outlet on same wall)\n' +
@@ -95,7 +96,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   } else if (customerType === 'returning' && job) {
     context = 'Returning customer. Name: ' + job.customer_name + '. Had a job in ' + job.city + ' on ' + job.preferred_time + '. Greet them warmly.';
   } else {
-    context = 'New customer. On the VERY FIRST message, introduce yourself as Gabe from Kansas City TV Mounting, thank them for reaching out, ask for their name, and answer their question — all in the same message. Then ask about the wall type but phrase it in a friendly way that helps them understand — say something like "Do you know what type of wall you\'re mounting to? Is it a normal wall like drywall or is it brick?" — never just say "what type of wall?" cold. If they respond without giving their name, keep gently asking each time until you get it — vary the phrasing so it doesn\'t sound robotic. Once you have their name use it naturally throughout. If they want to book, collect: number of TVs, size, mount type, wall type, wire concealment, city, preferred time.';
+    context = 'New customer. On the VERY FIRST message, introduce yourself as Gabe from Kansas City TV Mounting, thank them for reaching out, always ask for their name like this: "Do you mind if I grab your name?" — never "What\'s your name?" or "May I ask your name?", and answer their question — all in the same message. Then ask about the wall type but phrase it in a friendly way that helps them understand — say something like "Do you know what type of wall you\'re mounting to? Is it a normal wall like drywall or is it brick?" — never just say "what type of wall?" cold. If they respond without giving their name, keep gently asking each time until you get it — vary the phrasing so it doesn\'t sound robotic. Once you have their name use it naturally throughout. If they want to book, collect: number of TVs, size, mount type, wall type, wire concealment, city, preferred time.';
   }
   return 'You are texting for Kansas City TV Mounting (KCTVM) on behalf of Gabe. Keep replies short — this is SMS. Sound like a real person, not a bot. Never say you are AI.\n\n' +
     context + '\n\n' +
@@ -103,7 +104,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'SCHEDULING — READ THIS CAREFULLY:\n' +
     '"Soonest", "earliest", "today", "asap", "as soon as possible" ALL mean: check the calendar and find the next available slot at least 4 hours from right now. You already have this time in nextSlot. PROPOSE IT IN YOUR RESPONSE. Do not ask when they want to come. Do not say you will check. You have already checked. Just say the time.\n' +
     'Example: "I see we have an opening at 3:30 PM today — does that work for you?"\n' +
-    'When customer confirms a time, say something like: "Amazing! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" Then stop. Do NOT mention Stripe or payment links directly. The system handles sending the payment link automatically after the tech confirms.\n' +
+    'When customer confirms a time, say: "Amazing! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" Then stop.\n' +
     'Only submit the job AFTER the customer says yes to a specific time you proposed.\n' +
     (nextSlot ? '- The next available time slot is ' + nextSlot.label + '. You MUST say this time in your reply RIGHT NOW.\n' : '- No calendar slot available yet — ask what time of day works best.\n') +
     '- NEVER assume or mention a city the customer has not told you. Ask for it first.\n' +
@@ -144,16 +145,39 @@ async function scheduleFollowUp(phone, msg) {
   followUpTimers.set(phone, timer);
 }
 
-async function findNextAvailableTime() {
-  const { isTimeAvailable } = require('./service-calendar');
+async function findNextAvailableTime(requestedTime) {
+  const { isTimeAvailable, attemptDateParse } = require('./service-calendar');
+
+  // If customer requested a specific time, check that first
+  if (requestedTime) {
+    const parsed = attemptDateParse(requestedTime);
+    if (parsed && parsed > new Date()) {
+      const available = await isTimeAvailable(parsed).catch(() => false);
+      if (available) {
+        const timeStr = parsed.toLocaleString('en-US', {
+          timeZone: 'America/Chicago',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+          weekday: 'short',
+          month: 'numeric',
+          day: 'numeric'
+        });
+        return { time: parsed, label: timeStr };
+      }
+    }
+  }
+
+  // Otherwise find next available slot 4+ hours from now
   const now = new Date();
-
-  // Start at least 4 hours from now, rounded to next half hour
   let candidate = new Date(now.getTime() + 4 * 60 * 60 * 1000);
-  candidate.setMinutes(candidate.getMinutes() < 30 ? 30 : 0);
-  if (candidate.getMinutes() === 0) candidate.setHours(candidate.getHours() + 1);
+  const minutes = candidate.getMinutes();
+  if (minutes < 30) {
+    candidate.setMinutes(30, 0, 0);
+  } else {
+    candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
+  }
 
-  // Try up to 20 slots in 30-minute increments
   for (let i = 0; i < 20; i++) {
     try {
       const available = await isTimeAvailable(candidate);
@@ -191,8 +215,11 @@ async function handleConciergeMessage(from, body) {
       history.some(function(m) { return m.role === 'user' && (m.content.toLowerCase().includes('soonest') || m.content.toLowerCase().includes('earliest') || m.content.toLowerCase().includes('asap')); });
     var nextSlot = null;
     var hasCity = history.some(function(m) { return m.role === 'user' && (m.content.toLowerCase().includes('springs') || m.content.toLowerCase().includes('city') || m.content.toLowerCase().includes('kansas') || m.content.toLowerCase().includes('overland') || m.content.toLowerCase().includes('summit') || m.content.toLowerCase().includes('olathe') || m.content.toLowerCase().includes('independence') || m.content.toLowerCase().includes('liberty') || m.content.toLowerCase().includes('gladstone') || m.content.toLowerCase().includes('independence')); });
-    if (wantsEarliestTime && hasCity && history.length >= 2) {
-      nextSlot = await findNextAvailableTime();
+    // Check if customer mentioned a specific time
+    var specificTimeMatch = body.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
+    var requestedTime = specificTimeMatch ? body : null;
+    if ((wantsEarliestTime || requestedTime) && hasCity && history.length >= 2) {
+      nextSlot = await findNextAvailableTime(requestedTime);
     }
 
     var messages = history.slice(-10).concat([{ role: 'user', content: body }]);
