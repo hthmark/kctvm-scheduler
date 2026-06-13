@@ -251,9 +251,8 @@ async function handleConciergeMessage(from, body) {
       return m.role === 'user' && m.content.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
     });
     var jobCreated = hasConfirmedTime ? await checkAndCreateJob(from, updatedHistory) : false;
-    if (!jobCreated) {
-      await sendSMS(from, reply);
-    }
+    // Always send the reply — job creation runs in background
+    await sendSMS(from, reply);
     await scheduleFollowUp(from, body);
   } catch (err) {
     console.error('[Concierge] Error:', err.message);
