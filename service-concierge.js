@@ -322,7 +322,7 @@ async function checkAndCreateJob(phone, history) {
 
   try {
     var r = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5',
       max_tokens: 400,
       messages: [{ role: 'user', content: extractPrompt }]
     });
@@ -409,7 +409,7 @@ async function handleConciergeMessage(from, body, mediaUrls) {
     var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
 
     var response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5',
       max_tokens: 300,
       system: systemPrompt,
       messages: messages
