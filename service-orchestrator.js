@@ -100,13 +100,27 @@ async function processNewJob(job) {
       }
       await dispatchToNextTech(job.id);
     } else {
-      await updateJob(job.id, { status: 'scheduling_conflict' });
-      // Find next available slot silently instead of texting customer
-      console.log(`[Orchestrator] Conflict at ${job.preferred_time} — finding next slot`);
-      await updateJob(job.id, { status: 'awaiting_time_confirm' });
-      // Don't text customer — concierge will handle rescheduling naturally
-      // Schedule follow-up if no response in 3 hours
-      setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
+      // Calendar conflict — find next available slot and text customer
+      console.log(`[Orchestrator] Conflict at ${job.preferred_time} — finding next available slot`);
+      const { findNextAvailableTime } = require('./service-calendar');
+      const nextSlot = await findNextAvailableTime(null).catch(() => null);
+      const firstName = job.customer_name ? job.customer_name.split(' ')[0] : 'there';
+      if (nextSlot) {
+        await sendSMS(job.customer_phone,
+          `Hey ${firstName}, looks like we're already booked for ${job.preferred_time} unfortunately, but I have ${nextSlot.label} available. Does that work for you?`
+        );
+        await updateJob(job.id, {
+          status: 'awaiting_time_confirm',
+          proposed_time: nextSlot.time.toISOString(),
+          proposed_time_label: nextSlot.label
+        });
+        console.log(`[Orchestrator] Proposed ${nextSlot.label} to customer for job ${job.id}`);
+      } else {
+        await sendSMS(job.customer_phone,
+          `Hey ${firstName}, the time you requested isn't available unfortunately. What other day and time works for you?`
+        );
+        await updateJob(job.id, { status: 'awaiting_time_confirm' });
+      }
     }
   } else {
     await updateJob(job.id, { status: 'awaiting_time_confirm' });
@@ -117,6 +131,53 @@ async function processNewJob(job) {
 }
 
 async function handleCustomerTimeReply(job, timeText) {
+  const msgLower = timeText.toLowerCase().trim();
+
+  // Handle yes/no reply to a proposed time
+  const isYes = ['yes', 'y', 'yeah', 'yep', 'sure', 'ok', 'okay', 'works', 'perfect', 'sounds good', 'that works', "that'll work", 'great'].some(w => msgLower === w || msgLower.startsWith(w + ' ') || msgLower.endsWith(' ' + w));
+  const isNo = ['no', 'n', 'nope', 'doesnt work', "doesn't work", 'cant', "can't", 'not available', 'no good'].some(w => msgLower === w || msgLower.includes(w));
+
+  if (job.proposed_time && isYes && !isNo) {
+    // Customer accepted the proposed slot
+    const proposedDate = new Date(job.proposed_time);
+    const available = await isTimeAvailable(proposedDate);
+    if (available) {
+      const eventId = await createJobEvent(job, proposedDate);
+      await updateJob(job.id, {
+        status: 'tech_search',
+        scheduled_time: proposedDate.toISOString(),
+        preferred_time: job.proposed_time_label || job.proposed_time,
+        calendar_event_id: eventId,
+        tech_search_index: 0,
+        proposed_time: null,
+        proposed_time_label: null
+      });
+      await sendSMS(job.customer_phone, `Perfect! Let me get a tech confirmed for you and I'll send over a payment link shortly.`);
+      await dispatchToNextTech(job.id);
+      return;
+    } else {
+      // Slot got taken in the meantime — find another
+      const { findNextAvailableTime } = require('./service-calendar');
+      const nextSlot = await findNextAvailableTime(null).catch(() => null);
+      if (nextSlot) {
+        await sendSMS(job.customer_phone, `Ah sorry, that slot just got taken! How about ${nextSlot.label} instead?`);
+        await updateJob(job.id, { proposed_time: nextSlot.time.toISOString(), proposed_time_label: nextSlot.label });
+      } else {
+        await sendSMS(job.customer_phone, `Sorry about that — what day and time works best for you?`);
+        await updateJob(job.id, { proposed_time: null, proposed_time_label: null });
+      }
+      return;
+    }
+  }
+
+  if (job.proposed_time && isNo) {
+    // Customer declined the proposed slot — ask for their preference
+    await sendSMS(job.customer_phone, `No worries! What day and time works best for you?`);
+    await updateJob(job.id, { proposed_time: null, proposed_time_label: null });
+    return;
+  }
+
+  // Customer sent a specific time
   const parsedDate = attemptDateParse(timeText);
   if (!parsedDate) {
     const withToday = timeText.match(/^\d{1,2}(:\d{2})?\s*(am|pm)$/i) ? timeText + ' today' : null;
@@ -124,13 +185,13 @@ async function handleCustomerTimeReply(job, timeText) {
     if (retried) {
       return handleCustomerTimeReply(job, withToday);
     }
-    console.log(`[Orchestrator] Job ${job.id} awaiting time confirm — no automated text sent, concierge handles this`);
+    console.log(`[Orchestrator] Could not parse time "${timeText}" for job ${job.id} — concierge handles`);
     return;
   }
   const available = await isTimeAvailable(parsedDate);
   if (available) {
     const eventId = await createJobEvent(job, parsedDate);
-    await updateJob(job.id, { status: 'tech_search', scheduled_time: parsedDate.toISOString(), preferred_time: timeText, calendar_event_id: eventId, tech_search_index: 0 });
+    await updateJob(job.id, { status: 'tech_search', scheduled_time: parsedDate.toISOString(), preferred_time: timeText, calendar_event_id: eventId, tech_search_index: 0, proposed_time: null, proposed_time_label: null });
     await sendSMS(job.customer_phone, `Got it, ${timeText} — let me check availability and get you confirmed!`);
     await dispatchToNextTech(job.id);
   } else {

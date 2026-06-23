@@ -170,4 +170,73 @@ async function deleteJobEvent(eventId) {
   console.log(`[Calendar] Event deleted: ${eventId}`);
 }
 
-module.exports = { isTimeAvailable, createJobEvent, confirmJobEvent, deleteJobEvent, attemptDateParse };
+async function findNextAvailableTime(requestedTime) {
+  if (requestedTime) {
+    const parsed = attemptDateParse(requestedTime);
+    console.log('[Calendar] Requested time: "' + requestedTime + '" parsed to: ' + (parsed ? parsed.toISOString() : 'null'));
+    if (parsed && parsed > new Date()) {
+      let avail = false;
+      try { avail = await isTimeAvailable(parsed); } catch(e) {}
+      if (avail) {
+        const timeStr = parsed.toLocaleString('en-US', {
+          timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+          hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
+        });
+        return { time: parsed, label: timeStr, raw: parsed.toISOString(), exact: true };
+      }
+    }
+  }
+
+  const now = new Date();
+  let candidate = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+  const minutes = candidate.getMinutes();
+  if (minutes < 30) {
+    candidate.setMinutes(30, 0, 0);
+  } else {
+    candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
+  }
+
+  const getChicagoHour = (d) => {
+    const str = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: true });
+    const match = str.match(/(\d+):?(\d*)\s*(AM|PM)/i);
+    if (!match) return 12;
+    let h = parseInt(match[1]);
+    const ampm = match[3].toUpperCase();
+    if (ampm === 'PM' && h !== 12) h += 12;
+    if (ampm === 'AM' && h === 12) h = 0;
+    return h;
+  };
+
+  let safetyCount = 0;
+  while (safetyCount++ < 48) {
+    const hour = getChicagoHour(candidate);
+    if (hour >= 8 && hour < 19) break;
+    const nextDay = new Date(candidate);
+    nextDay.setDate(nextDay.getDate() + (hour >= 19 ? 1 : 0));
+    const dateStr = nextDay.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const parts = dateStr.split('/');
+    candidate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), 8, 0, 0, 0);
+    const offset = new Date(candidate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    candidate = new Date(candidate.getTime() + (candidate - offset));
+  }
+
+  for (let i = 0; i < 20; i++) {
+    try {
+      const available = await isTimeAvailable(candidate);
+      if (available) {
+        const label = candidate.toLocaleString('en-US', {
+          timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+          hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
+        });
+        return { time: candidate, label: label, raw: candidate.toISOString(), exact: false };
+      }
+    } catch (err) {
+      console.error('[Calendar] findNextAvailableTime error:', err.message);
+      break;
+    }
+    candidate = new Date(candidate.getTime() + 30 * 60 * 1000);
+  }
+  return null;
+}
+
+module.exports = { isTimeAvailable, createJobEvent, confirmJobEvent, deleteJobEvent, attemptDateParse, findNextAvailableTime };

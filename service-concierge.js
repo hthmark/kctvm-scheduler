@@ -101,6 +101,8 @@ async function findNextAvailableTime(requestedTime) {
   var calendarModule = require('./service-calendar');
   var isTimeAvailable = calendarModule.isTimeAvailable;
   var attemptDateParse = calendarModule.attemptDateParse;
+  // Note: canonical implementation now lives in service-calendar.js — keeping this
+  // copy here so the concierge can call it directly without re-requiring below.
 
   if (requestedTime) {
     var parsed = attemptDateParse(requestedTime);
