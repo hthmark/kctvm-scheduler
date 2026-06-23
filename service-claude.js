@@ -68,7 +68,7 @@ Format EXACTLY:
 Keep under 320 characters. Be concise and natural.`;
 
   const message = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-5',
     max_tokens: 320,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -123,7 +123,7 @@ Respond in JSON only, no other text:
 }`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-5',
     max_tokens: 500,
     messages: [{
       role: 'user',
