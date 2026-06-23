@@ -235,7 +235,7 @@ async function findNextAvailableTime(requestedTime) {
       console.error('[Calendar] findNextAvailableTime error:', err.message);
       break;
     }
-    candidate = new Date(candidate.getTime() + 30 * 60 * 1000);
+    candidate = new Date(candidate.getTime() + 90 * 60 * 1000);
   }
   return null;
 }
