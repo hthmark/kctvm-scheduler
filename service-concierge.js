@@ -290,16 +290,14 @@ async function scheduleFollowUp(phone, msg) {
     var check = await supabase.from('follow_up_sent').select('phone').eq('phone', phone).single();
     if (check.data) return;
   } catch (e) {}
-  // Write scheduled_at to Supabase — edge function cron picks this up (survives Railway restarts)
-  // TEST: 1 minute. PROD: now() + interval '3 hours'
+  // Write to follow_up_queue — edge function cron picks this up (survives Railway restarts)
+  // TEST: 1 minute. PROD: change to Date.now() + 3 * 60 * 60 * 1000
   try {
-    await supabase.from('sms_conversations').insert({
-      phone: phone,
-      role: 'system',
-      content: 'follow_up_scheduled',
-      follow_up_scheduled_at: new Date(Date.now() + 1 * 60 * 1000).toISOString()
-    });
-    console.log('[Concierge] Follow-up scheduled in Supabase for ' + phone);
+    await supabase.from('follow_up_queue').upsert(
+      { phone: phone, scheduled_at: new Date(Date.now() + 1 * 60 * 1000).toISOString(), sent: false },
+      { onConflict: 'phone', ignoreDuplicates: false }
+    );
+    console.log('[Concierge] Follow-up queued in Supabase for ' + phone);
   } catch (err) {
     console.error('[Concierge] scheduleFollowUp error:', err.message);
   }
