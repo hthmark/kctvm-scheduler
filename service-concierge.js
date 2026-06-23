@@ -11,17 +11,25 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 const OWNER_PHONE = process.env.OWNER_PHONE || '+13862287246';
 
 const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
-  '- First TV under 65": $140 (labor only, NO mount included)\n' +
-  '- First TV 65" or larger: $160 (labor only, NO mount included)\n' +
-  '- Each additional TV under 65": $70\n' +
-  '- Each additional TV 65"+: $80\n' +
-  '- Fixed mount add-on (we source it): +$60\n' +
-  '- Articulating/full motion mount add-on (we source it): +$120\n' +
-  '- Brick wall: +$150 per TV\n' +
-  '- Wire/cable concealment: +$150 per TV (requires existing outlet on same wall)\n' +
-  '- IMPORTANT: Base price is labor only. Mounts are NEVER included. Always an add-on.\n' +
-  '- When quoting with a mount always ask "unless you have your own mount?" at the end.\n' +
-  '- We do NOT install new outlets. If no outlet on the wall, ask if they are flexible on TV placement.\n' +
+  'LABOR (per TV):\n' +
+  '- TV #1 under 65": $140\n' +
+  '- TV #1 65" or larger: $160\n' +
+  '- Each additional TV (TV #2, #3, etc.) under 65": $70\n' +
+  '- Each additional TV (TV #2, #3, etc.) 65" or larger: $80\n' +
+  'ADD-ONS (on top of labor, per TV where applicable):\n' +
+  '- Fixed mount (we source and bring it): +$60\n' +
+  '- Articulating/full-motion mount (we source and bring it): +$120\n' +
+  '- Brick wall: +$150\n' +
+  '- Wire/cable concealment: +$150 (requires existing outlet on same wall)\n' +
+  'IMPORTANT: Labor is NEVER included with mount — always separate. Mount add-on only applies if customer does NOT have their own mount.\n' +
+  'HOW TO CALCULATE — always build up TV by TV:\n' +
+  '  TV1: [labor for first TV] + [add-ons]\n' +
+  '  TV2: [labor for additional TV at $70 or $80] + [add-ons]\n' +
+  '  Total = sum of all TVs\n' +
+  'EXAMPLE: TV1=55" own mount drywall no wire ($140), TV2=75" articulating mount drywall wire ($80+$120+$150=$350) → Total $490\n' +
+  'EXAMPLE: TV1=50" fixed mount brick wire ($140+$60+$150+$150=$500), TV2=40" own mount drywall no wire ($70) → Total $570\n' +
+  'When quoting, always show the breakdown per TV then the total. Ask "unless you have your own mount?" when a mount is needed.\n' +
+  'We do NOT install new outlets. If no outlet on the wall, ask if they are flexible on TV placement.\n' +
   '- TVs 65" or larger: Must confirm someone can help with the lift before booking.\n' +
   '  Ask: "Just a heads up - since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n' +
   '  If no one can help with lift: say "Let me get Gabe on this for you" and route to manual.\n\n' +
@@ -318,6 +326,15 @@ async function checkAndCreateJob(phone, history) {
   var extractPrompt = 'Given this SMS conversation, determine if we have COMPLETE booking details.\n' +
     'Required: customer name, city, confirmed preferred time, number of TVs, TV size, mount type, wall type, wire concealment, total price.\n\n' +
     'Conversation:\n' + conversationText + '\n\n' +
+    'PRICING RULES for total_price calculation:\n' +
+    '- TV #1 labor: under 65"=$140, 65"+ =$160\n' +
+    '- TV #2+ labor: under 65"=$70, 65"+ =$80 (NOT $140/$160 — these are additional TV rates)\n' +
+    '- Fixed mount (only if we source it, tv_N_mount="fixed"): +$60 per TV\n' +
+    '- Articulating mount (only if we source it, tv_N_mount="articulating"): +$120 per TV\n' +
+    '- Brick wall: +$150 per TV\n' +
+    '- Wire concealment (tv_N_wire="cable"): +$150 per TV\n' +
+    '- If tv_N_mount="yes" customer has own mount — NO mount add-on cost\n' +
+    'Example: TV1=55" own mount drywall no wire = $140. TV2=75" articulating drywall wire = $80+$120+$150 = $350. Total = $490.\n\n' +
     'If ALL details are present and customer confirmed a specific time AND agreed to the price, respond with JSON only:\n' +
     '{"ready":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
     'tv_1_inches: use actual inch number from conversation. Under 65=small, 65+=large. Unknown small=52, unknown large=75.\n' +
