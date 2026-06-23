@@ -306,7 +306,7 @@ async function scheduleFollowUp(phone, msg) {
     } catch (err) {
       console.error('[Concierge] Follow-up error:', err.message);
     }
-  }, 3 * 60 * 60 * 1000);
+  }, 60 * 1000);
   followUpTimers.set(phone, timer);
 }
 
