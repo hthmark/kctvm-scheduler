@@ -222,7 +222,8 @@ async function findNextAvailableTime(requestedTime) {
 
   for (let i = 0; i < 20; i++) {
     try {
-      const available = await isTimeAvailable(candidate);
+      // Check 90-min job window + 30-min buffer after = 120 min total to ensure no back-to-back jobs
+      const available = await isTimeAvailable(candidate, 120);
       if (available) {
         const label = candidate.toLocaleString('en-US', {
           timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',

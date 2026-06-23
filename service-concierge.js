@@ -230,7 +230,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   var slotInstruction = '';
   if (nextSlot) {
     if (nextSlot.exact) {
-      slotInstruction = 'TIME CONFIRMED: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "That\'ll work! I\'ll put you down for ' + nextSlot.label + ' in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n';
+      slotInstruction = 'TIME CONFIRMED: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "Perfect, let me check on availability and get right back to you!"\n';
     } else {
       slotInstruction = 'EARLIEST AVAILABLE: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
@@ -245,9 +245,9 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'NEVER suggest or propose a time unless the customer has told you a specific time or said soonest/earliest/asap. If they have not mentioned a time, just ask: "What day and time works best for you?"\n' +
     'NEVER assume a city — use ONLY the exact city the customer stated in this conversation.\n' +
     'CRITICAL TIME RULES:\n' +
-    '1. Customer requested specific time and it IS available: say "That\'ll work! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n' +
+    '1. Customer requested specific time and it IS available: say "Perfect, let me check on availability and get right back to you!" — NEVER say you\'re putting them down for a time or mention payment links. The orchestrator handles all confirmations.\n' +
     '2. Proposing earliest available time: say "I see we have an opening at [time] — does that work for you?"\n' +
-    '3. When customer confirms earliest time: say "Amazing! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n\n' +
+    '3. When customer confirms earliest time: say "Perfect, let me check on availability and get right back to you!" — same rule, no confirmations from the concierge.\n\n' +
     'CRITICAL SMS RULES:\n' +
     'Your response is sent DIRECTLY as an SMS. No asterisks, no bullet points, no brackets, no bold, no internal notes, no job summaries. Plain conversational text only. Never write anything between ** or [] or - lists.\n' +
     'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
@@ -296,7 +296,7 @@ async function scheduleFollowUp(phone, msg) {
   // TEST: 1 minute. PROD: change to Date.now() + 3 * 60 * 60 * 1000
   try {
     await supabase.from('follow_up_queue').upsert(
-      { phone: phone, scheduled_at: new Date(Date.now() + 1 * 60 * 1000).toISOString(), sent: false },
+      { phone: phone, scheduled_at: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(), sent: false },
       { onConflict: 'phone', ignoreDuplicates: false }
     );
     console.log('[Concierge] Follow-up queued in Supabase for ' + phone);
