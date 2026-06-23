@@ -188,11 +188,12 @@ async function findNextAvailableTime(requestedTime) {
   }
 
   const now = new Date();
+  // Start at least 4h from now, rounded up to next clean :00 or :30
   let candidate = new Date(now.getTime() + 4 * 60 * 60 * 1000);
-  const minutes = candidate.getMinutes();
-  if (minutes < 30) {
+  const cm = candidate.getMinutes();
+  if (cm > 0 && cm <= 30) {
     candidate.setMinutes(30, 0, 0);
-  } else {
+  } else if (cm > 30) {
     candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
   }
 
