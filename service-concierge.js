@@ -283,8 +283,6 @@ async function handlePostBookingChange(from, body, job, reply) {
   }
 }
 
-var followUpTimers = new Map();
-
 async function scheduleFollowUp(phone, msg) {
   var keywords = ['how much', 'price', 'cost', 'charge', 'mount', 'tv', 'install', 'available', 'book', 'schedule'];
   if (!keywords.some(function(k) { return msg.toLowerCase().includes(k); })) return;
@@ -292,22 +290,19 @@ async function scheduleFollowUp(phone, msg) {
     var check = await supabase.from('follow_up_sent').select('phone').eq('phone', phone).single();
     if (check.data) return;
   } catch (e) {}
-  if (followUpTimers.has(phone)) clearTimeout(followUpTimers.get(phone));
-  var timer = setTimeout(async function() {
-    followUpTimers.delete(phone);
-    try {
-      var sent = await supabase.from('follow_up_sent').select('phone').eq('phone', phone).single();
-      if (sent.data) return;
-      var normalized = phone.startsWith('+') ? phone : '+1' + phone.replace(/\D/g, '');
-      var active = await supabase.from('jobs').select('id').or('customer_phone.eq.' + normalized).not('status', 'in', '("cancelled","completed")').limit(1);
-      if (active.data && active.data.length > 0) return;
-      await sendSMS(phone, 'Hey, just following up to see if you were still interested in getting your TV mounted? No worries if not!');
-      await supabase.from('follow_up_sent').insert({ phone: phone });
-    } catch (err) {
-      console.error('[Concierge] Follow-up error:', err.message);
-    }
-  }, 60 * 1000);
-  followUpTimers.set(phone, timer);
+  // Write scheduled_at to Supabase — edge function cron picks this up (survives Railway restarts)
+  // TEST: 1 minute. PROD: now() + interval '3 hours'
+  try {
+    await supabase.from('sms_conversations').insert({
+      phone: phone,
+      role: 'system',
+      content: 'follow_up_scheduled',
+      follow_up_scheduled_at: new Date(Date.now() + 1 * 60 * 1000).toISOString()
+    });
+    console.log('[Concierge] Follow-up scheduled in Supabase for ' + phone);
+  } catch (err) {
+    console.error('[Concierge] scheduleFollowUp error:', err.message);
+  }
 }
 
 async function checkAndCreateJob(phone, history) {
