@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleCustomerTimeReply, handleJobCompletion, handleTechPhotos } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -116,26 +116,6 @@ router.post('/inbound', async (req, res) => {
 
       // Tech sent something else — ignore silently
       return;
-    }
-
-    // ── NOT A TECH — CHECK CUSTOMER WORKFLOW STATE ───────────────────────────
-
-    // Check if customer is in active workflow waiting for time confirmation
-    if (body) {
-      const canonicalPhone = from.startsWith('+') ? from : `+1${normalizedFrom.slice(-10)}`;
-      const { data: workflowJobs } = await supabase
-        .from('jobs').select('*')
-        .eq('customer_phone', canonicalPhone)
-        .in('status', ['awaiting_time_confirm', 'scheduling_conflict'])
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (workflowJobs && workflowJobs.length > 0) {
-        // Customer is replying with a new time — handle normally
-        console.log(`[SMS Inbound] Customer in time-confirm workflow — routing to handleCustomerTimeReply`);
-        await handleCustomerTimeReply(workflowJobs[0], body);
-        return;
-      }
     }
 
     // ── ROUTE TO AI CONCIERGE ────────────────────────────────────────────────

@@ -85,145 +85,35 @@ async function updateJob(jobId, updates) {
 async function processNewJob(job) {
   console.log(`[Orchestrator] processNewJob START — job ${job.id} preferred_time="${job.preferred_time}"`);
   await updateJob(job.id, { status: 'scheduling' });
-  console.log(`[Orchestrator] updateJob → scheduling (job ${job.id})`);
 
   const preferredDate = attemptDateParse(job.preferred_time);
-  console.log(`[Orchestrator] attemptDateParse result: ${preferredDate ? preferredDate.toISOString() : 'null'} (future: ${preferredDate ? preferredDate > new Date() : false})`);
+  console.log(`[Orchestrator] attemptDateParse result: ${preferredDate ? preferredDate.toISOString() : 'null'}`);
 
-  if (preferredDate && preferredDate > new Date()) {
-    let available = false;
-    try {
-      available = await isTimeAvailable(preferredDate);
-      console.log(`[Orchestrator] isTimeAvailable(${preferredDate.toISOString()}) → ${available}`);
-    } catch (calErr) {
-      console.error(`[Orchestrator] isTimeAvailable ERROR for job ${job.id}:`, calErr.message, calErr.stack);
-    }
-
-    if (available) {
-      console.log(`[Orchestrator] Time available — creating calendar event`);
-      const eventId = await createJobEvent(job, preferredDate);
-      console.log(`[Orchestrator] Calendar event created: ${eventId}`);
-      await updateJob(job.id, { status: 'tech_search', scheduled_time: preferredDate.toISOString(), calendar_event_id: eventId, tech_search_index: 0 });
-      console.log(`[Orchestrator] updateJob → tech_search (job ${job.id})`);
-
-      const { outOfRangeTVs } = buildSupplyList(job);
-      if (outOfRangeTVs.length > 0) {
-        const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum}`).join(', ');
-        console.log(`[Orchestrator] Out-of-range TVs detected: ${tvNums} — holding for manual review`);
-        await updateJob(job.id, { status: 'awaiting_time_confirm' });
-        console.log(`[Orchestrator] updateJob → awaiting_time_confirm (out-of-range TVs, job ${job.id})`);
-        return;
-      }
-      console.log(`[Orchestrator] No out-of-range TVs — dispatching to tech`);
-      await dispatchToNextTech(job.id);
-    } else {
-      // Calendar conflict — find next available slot and text customer
-      console.log(`[Orchestrator] Conflict at "${job.preferred_time}" — finding next available slot`);
-      const { findNextAvailableTime } = require('./service-calendar');
-      const nextSlot = await findNextAvailableTime(job.preferred_time).catch((e) => { console.error('[Orchestrator] findNextAvailableTime ERROR:', e.message); return null; });
-      console.log(`[Orchestrator] findNextAvailableTime result: ${nextSlot ? nextSlot.label : 'null'}`);
-      const firstName = job.customer_name ? job.customer_name.split(' ')[0] : 'there';
-      if (nextSlot) {
-        await sendSMS(job.customer_phone,
-          `Hey ${firstName}, looks like we're already booked for ${job.preferred_time} unfortunately, but I have ${nextSlot.label} available. Does that work for you?`
-        );
-        await updateJob(job.id, {
-          status: 'awaiting_time_confirm',
-          proposed_time: nextSlot.time.toISOString(),
-          proposed_time_label: nextSlot.label
-        });
-        console.log(`[Orchestrator] updateJob → awaiting_time_confirm with proposed_time=${nextSlot.time.toISOString()} (job ${job.id})`);
-      } else {
-        await sendSMS(job.customer_phone,
-          `Hey ${firstName}, the time you requested isn't available unfortunately. What other day and time works for you?`
-        );
-        await updateJob(job.id, { status: 'awaiting_time_confirm' });
-        console.log(`[Orchestrator] updateJob → awaiting_time_confirm (no slot found, job ${job.id})`);
-      }
-    }
-  } else {
+  if (!preferredDate || preferredDate <= new Date()) {
+    console.warn(`[Orchestrator] Job ${job.id} has unparseable/past time — this should not happen (concierge should verify first)`);
     await updateJob(job.id, { status: 'awaiting_time_confirm' });
-    console.log(`[Orchestrator] updateJob → awaiting_time_confirm (unparseable/past time, job ${job.id})`);
-    // Schedule follow-up if no response in 3 hours
-    setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
-  }
-  console.log(`[Orchestrator] processNewJob END — job ${job.id}`);
-}
-
-async function classifyTimeConfirmation(message) {
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const resp = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 5,
-    messages: [{ role: 'user', content: `Does this message confirm acceptance of a proposed appointment time? Reply only YES or NO: ${message}` }],
-  });
-  const answer = resp.content[0].text.trim().toUpperCase();
-  console.log(`[Orchestrator] Time confirmation classification for "${message}": ${answer}`);
-  return answer === 'YES';
-}
-
-async function handleCustomerTimeReply(job, timeText) {
-  if (job.proposed_time) {
-    const isConfirm = await classifyTimeConfirmation(timeText).catch(() => null);
-    if (isConfirm === true) {
-      // Customer accepted the proposed slot
-      const proposedDate = new Date(job.proposed_time);
-      const available = await isTimeAvailable(proposedDate);
-      if (available) {
-        const eventId = await createJobEvent(job, proposedDate);
-        await updateJob(job.id, {
-          status: 'tech_search',
-          scheduled_time: proposedDate.toISOString(),
-          preferred_time: job.proposed_time_label || job.proposed_time,
-          calendar_event_id: eventId,
-          tech_search_index: 0,
-          proposed_time: null,
-          proposed_time_label: null
-        });
-        await sendSMS(job.customer_phone, `Perfect! Let me get a tech confirmed for you and I'll send over a payment link shortly.`);
-        await dispatchToNextTech(job.id);
-      } else {
-        // Slot got taken in the meantime — find another
-        const { findNextAvailableTime } = require('./service-calendar');
-        const nextSlot = await findNextAvailableTime(null).catch(() => null);
-        if (nextSlot) {
-          await sendSMS(job.customer_phone, `Ah sorry, that slot just got taken! How about ${nextSlot.label} instead?`);
-          await updateJob(job.id, { proposed_time: nextSlot.time.toISOString(), proposed_time_label: nextSlot.label });
-        } else {
-          await sendSMS(job.customer_phone, `Sorry about that — what day and time works best for you?`);
-          await updateJob(job.id, { proposed_time: null, proposed_time_label: null });
-        }
-      }
-      return;
-    } else {
-      // Customer declined the proposed slot — ask for their preference
-      await sendSMS(job.customer_phone, `No problem! What time works better for you?`);
-      await updateJob(job.id, { status: 'scheduling', proposed_time: null, proposed_time_label: null });
-      return;
-    }
-  }
-
-  // Customer sent a specific time
-  const parsedDate = attemptDateParse(timeText);
-  if (!parsedDate) {
-    const withToday = timeText.match(/^\d{1,2}(:\d{2})?\s*(am|pm)$/i) ? timeText + ' today' : null;
-    const retried = withToday ? attemptDateParse(withToday) : null;
-    if (retried) {
-      return handleCustomerTimeReply(job, withToday);
-    }
-    console.log(`[Orchestrator] Could not parse time "${timeText}" for job ${job.id} — concierge handles`);
     return;
   }
-  const available = await isTimeAvailable(parsedDate);
-  if (available) {
-    const eventId = await createJobEvent(job, parsedDate);
-    await updateJob(job.id, { status: 'tech_search', scheduled_time: parsedDate.toISOString(), preferred_time: timeText, calendar_event_id: eventId, tech_search_index: 0, proposed_time: null, proposed_time_label: null });
-    await sendSMS(job.customer_phone, `Perfect! You'll hear back shortly once we confirm your tech.`);
-    await dispatchToNextTech(job.id);
-  } else {
-    await sendSMS(job.customer_phone, `Sorry, ${timeText} is already booked. Do you have another time that works?`);
+
+  const eventId = await createJobEvent(job, preferredDate);
+  console.log(`[Orchestrator] Calendar event created: ${eventId}`);
+  await updateJob(job.id, { status: 'tech_search', scheduled_time: preferredDate.toISOString(), calendar_event_id: eventId, tech_search_index: 0 });
+  console.log(`[Orchestrator] updateJob → tech_search (job ${job.id})`);
+
+  const { outOfRangeTVs } = buildSupplyList(job);
+  if (outOfRangeTVs.length > 0) {
+    const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum} (${t.inches || t.size}", ${t.mount})`).join(', ');
+    console.log(`[Orchestrator] Out-of-range TVs detected: ${tvNums} — alerting owner, holding job`);
+    await updateJob(job.id, { status: 'awaiting_time_confirm' });
+    await sendSMS(OWNER_PHONE,
+      `⚠️ MANUAL MOUNT NEEDED\n${job.customer_name} — ${job.city}\nTime: ${job.preferred_time}\nOut-of-range: ${tvNums}\nJob ID: ${job.id}`
+    );
+    return;
   }
+
+  console.log(`[Orchestrator] Dispatching to tech for job ${job.id}`);
+  await dispatchToNextTech(job.id);
+  console.log(`[Orchestrator] processNewJob END — job ${job.id}`);
 }
 
 async function dispatchToNextTech(jobId) {
@@ -436,4 +326,4 @@ async function sendFollowUp(jobId) {
   console.log(`[Orchestrator] Follow-up sent to ${job.customer_name} — marked permanently`);
 }
 
-module.exports = { processNewJob, handleCustomerTimeReply, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout };

@@ -337,10 +337,16 @@ async function checkAndCreateJob(phone, history) {
     '- Wire concealment (tv_N_wire="cable"): +$150 per TV\n' +
     '- If tv_N_mount="yes" customer has own mount — NO mount add-on cost\n' +
     'Example: TV1=55" own mount drywall no wire = $140. TV2=75" articulating drywall wire = $80+$120+$150 = $350. Total = $490.\n\n' +
-    'If ALL details are present and customer confirmed a specific time AND agreed to the price, respond with JSON only:\n' +
-    '{"ready":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
+    'TIME CONFIRMATION RULES — set time_confirmed=true ONLY when ALL THREE of these are true:\n' +
+    '1. The customer has already agreed to the total price earlier in the conversation (not just been quoted it)\n' +
+    '2. The customer has explicitly agreed to a specific time — not just mentioned one\n' +
+    '3. That agreement was a direct response to either: (a) KCTVM acknowledging the customer\'s stated time preference, OR (b) KCTVM proposing a specific alternative slot and the customer saying yes/ok/sure/works/etc.\n' +
+    'If the customer only mentioned a time without being asked to confirm it, or if the price has not yet been agreed to, set time_confirmed=false.\n\n' +
+    'If ALL details are present and price is confirmed, respond with JSON only:\n' +
+    '{"ready":true,"time_confirmed":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
     'tv_1_inches: use actual inch number from conversation. Under 65=small, 65+=large. Unknown small=52, unknown large=75.\n' +
     'tv_1_mount values: "yes" = customer already has their own mount and we do NOT need to source one. "fixed" = we need to source and bring a fixed mount (+$60). "articulating" = we need to source and bring an articulating mount (+$120). If customer says "I have my own mount" or "I have a mount" or "I have a fixed mount" — use "yes", NOT "fixed".\n' +
+    'If price confirmed but time not yet explicitly confirmed: {"ready":true,"time_confirmed":false,...all other fields...}\n' +
     'If not complete: {"ready":false}\n' +
     'JSON only, no other text.';
 
@@ -358,6 +364,11 @@ async function checkAndCreateJob(phone, history) {
       return false;
     }
 
+    if (!data.time_confirmed) {
+      console.log('[checkAndCreateJob] BLOCKED — time not yet confirmed by customer');
+      return false;
+    }
+
     // Block vague times
     var hasSpecificTime = data.preferred_time && data.preferred_time.match(/\d{1,2}(:\d{2})?\s*(am|pm)/i);
     var vagueTerms = ['soonest', 'earliest', 'asap', 'as soon as', 'requesting', 'available'];
@@ -366,9 +377,36 @@ async function checkAndCreateJob(phone, history) {
       return false;
     }
 
+    // Calendar check before creating the job
+    var calMod = require('./service-calendar');
+    var parsedDate = calMod.attemptDateParse(data.preferred_time);
+    if (parsedDate && parsedDate > new Date()) {
+      var slotAvailable = false;
+      try { slotAvailable = await calMod.isTimeAvailable(parsedDate); } catch(e) {
+        console.error('[checkAndCreateJob] Calendar check error:', e.message);
+      }
+      if (!slotAvailable) {
+        console.log('[checkAndCreateJob] Conflict at "' + data.preferred_time + '" — finding next slot');
+        var nextSlot = null;
+        try { nextSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
+        if (nextSlot) {
+          var conflictMsg = 'Ah, looks like ' + data.preferred_time + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
+          await addToHistory(phone, 'assistant', conflictMsg);
+          await sendSMS(phone, conflictMsg);
+          console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label + ' to customer');
+        } else {
+          var noSlotMsg = 'Hmm, that time just got taken and I\'m having trouble finding the next open slot. What other time works for you?';
+          await addToHistory(phone, 'assistant', noSlotMsg);
+          await sendSMS(phone, noSlotMsg);
+        }
+        return false;
+      }
+    }
+
     console.log('[checkAndCreateJob] SUBMITTING job for ' + phone + ' at ' + data.preferred_time);
     var payload = Object.assign({}, data, { phone: phone });
     delete payload.ready;
+    delete payload.time_confirmed;
     await axios.post(process.env.BASE_URL + '/webhook/quote', payload, {
       headers: { 'Content-Type': 'application/json' }
     });
@@ -460,8 +498,8 @@ async function handleConciergeMessage(from, body, mediaUrls) {
     // Send reply
     await sendSMS(from, reply);
 
-    // Try to create job if new customer with all details
-    if (info.type === 'new' || (info.type === 'active' && ['awaiting_time_confirm','scheduling_conflict'].includes(info.job ? info.job.status : ''))) {
+    // Try to create job if new customer with all details (time+price both confirmed)
+    if (info.type === 'new') {
       var confirmedWords = ["that'll work", "that works", "yes", "perfect", "sounds good", "great", "yep", "sure", "ok", "okay", "works for me", "let's do it", "do it", "amazing", "awesome", "confirmed", "book it", "let's do", "that work", "works"];
       var customerConfirmed = confirmedWords.some(function(w) { return msgLower.includes(w); });
       var hasSpecificTimeInHistory = customerConfirmed || history.concat([{role:'user',content:body},{role:'assistant',content:reply}]).some(function(m) {
