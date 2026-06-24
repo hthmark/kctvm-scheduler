@@ -1,6 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { sendSMS } = require('./service-sms');
-const { isTimeAvailable, createJobEvent, confirmJobEvent, deleteJobEvent, attemptDateParse } = require('./service-calendar');
+const { isTimeAvailable, createJobEvent, confirmJobEvent, deleteJobEvent, attemptDateParse, findNextAvailableTime } = require('./service-calendar');
 const { generateTechMessage, analyzeJobPhotos } = require('./service-claude');
 const { createPaymentLink, checkPaymentStatus } = require('./service-stripe');
 
@@ -337,4 +337,75 @@ async function sendFollowUp(jobId) {
   console.log(`[Orchestrator] Follow-up sent to ${job.customer_name} — marked permanently`);
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout };
+// ─── RESCHEDULE FLOW ──────────────────────────────────────────────────────────
+
+async function handleRescheduleRequest(job, messageText) {
+  const firstName = job.customer_name.split(' ')[0];
+
+  const newDate = attemptDateParse(messageText);
+  if (!newDate) {
+    await sendSMS(job.customer_phone, `What day and time works better for you?`);
+    return;
+  }
+
+  const available = await isTimeAvailable(newDate).catch(() => false);
+  if (!available) {
+    const alt = await findNextAvailableTime(null).catch(() => null);
+    if (alt) {
+      await sendSMS(job.customer_phone, `That time is taken — how about ${alt.label}? Does that work?`);
+    } else {
+      await sendSMS(job.customer_phone, `Sorry, none of our techs are available for that time — would you like to try a different day or time?`);
+    }
+    return;
+  }
+
+  // Time is available — ask the confirmed tech
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
+  const displayTime = formatPreferredTime(newDate.toISOString());
+  await updateJob(job.id, { status: 'rescheduling_tech_confirm', rescheduling_new_time: newDate.toISOString() });
+  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer wants to move your job in ${job.city} to ${displayTime}. Does that still work for you?`);
+  console.log(`[Orchestrator] Reschedule requested for job ${job.id} → ${newDate.toISOString()}, awaiting tech ${tech.name} reply`);
+}
+
+async function handleRescheduleReply(job, techId, reply) {
+  const normalized = reply.trim().toLowerCase();
+  const newDate = new Date(job.rescheduling_new_time);
+  const displayTime = formatPreferredTime(job.rescheduling_new_time);
+  const firstName = job.customer_name.split(' ')[0];
+
+  if (normalized === 'yes' || normalized === 'y') {
+    // Delete old calendar event, create new one
+    if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
+    const newEventId = await createJobEvent(job, newDate);
+    await confirmJobEvent(newEventId, job.confirmed_tech_name);
+    await updateJob(job.id, {
+      status: 'confirmed',
+      preferred_time: job.rescheduling_new_time,
+      scheduled_time: newDate.toISOString(),
+      calendar_event_id: newEventId,
+      rescheduling_new_time: null,
+    });
+    await sendSMS(job.customer_phone, `You're all set, ${firstName} — rescheduled to ${displayTime}!`);
+    console.log(`[Orchestrator] Job ${job.id} rescheduled to ${newDate.toISOString()}`);
+  } else {
+    // Tech can't do the new time — try next tech with the new scheduled time
+    await updateJob(job.id, {
+      status: 'tech_search',
+      scheduled_time: newDate.toISOString(),
+      preferred_time: job.rescheduling_new_time,
+      rescheduling_new_time: null,
+      tech_search_index: (job.tech_search_index || 0) + 1,
+    });
+    // Override no-tech message so it makes sense for a reschedule context
+    const { data: refreshedJob } = await supabase.from('jobs').select('*').eq('id', job.id).single();
+    const { data: techs } = await supabase.from('technicians').select('*').eq('active', true).order('priority', { ascending: true });
+    if ((refreshedJob.tech_search_index || 0) >= techs.length) {
+      await updateJob(job.id, { status: 'confirmed', preferred_time: job.preferred_time, scheduled_time: job.scheduled_time, rescheduling_new_time: null });
+      await sendSMS(job.customer_phone, `Sorry, none of our techs are available for that time — would you like to try a different day or time?`);
+      return;
+    }
+    await dispatchToNextTech(job.id);
+  }
+}
+
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleReply };

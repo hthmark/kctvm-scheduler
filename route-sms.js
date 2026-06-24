@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleJobCompletion, handleTechPhotos } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleReply } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -87,6 +87,25 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
+      // Tech is replying to a reschedule confirmation request
+      const { data: reschedulingJob } = await supabase
+        .from('jobs').select('*')
+        .eq('current_tech_id', tech.id)
+        .eq('status', 'rescheduling_tech_confirm')
+        .single();
+
+      if (reschedulingJob) {
+        if (bodyLower === 'yes' || bodyLower === 'y') {
+          await handleRescheduleReply(reschedulingJob, tech.id, 'yes');
+        } else if (bodyLower === 'no' || bodyLower === 'n') {
+          await handleRescheduleReply(reschedulingJob, tech.id, 'no');
+        } else {
+          const { sendSMS } = require('./service-sms');
+          await sendSMS(from, `Please reply "Yes" if the new time works or "No" if not. Thanks!`);
+        }
+        return;
+      }
+
       // Tech replied Done
       if (bodyLower === 'done' || bodyLower === 'complete' || bodyLower === 'finished') {
         console.log(`[SMS Inbound] Tech ${tech.name} replied Done — looking for confirmed job`);
@@ -117,6 +136,28 @@ router.post('/inbound', async (req, res) => {
 
       // Tech sent something else — ignore silently
       return;
+    }
+
+    // ── CHECK FOR RESCHEDULE REQUEST ─────────────────────────────────────────
+    const rescheduleKeywords = ['reschedule', 'change', 'move', 'different time', 'different day', 'can we do', 'can you come'];
+    const isRescheduleRequest = rescheduleKeywords.some(kw => bodyLower.includes(kw));
+
+    if (isRescheduleRequest && body) {
+      const { data: activeJob } = await supabase
+        .from('jobs').select('*')
+        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .in('status', ['confirmed', 'awaiting_payment'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (activeJob) {
+        console.log(`[SMS Inbound] Reschedule request from ${from} for job ${activeJob.id}`);
+        handleRescheduleRequest(activeJob, body).catch(err =>
+          console.error('[SMS Inbound] Reschedule error:', err)
+        );
+        return;
+      }
     }
 
     // ── ROUTE TO AI CONCIERGE ────────────────────────────────────────────────
