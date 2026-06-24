@@ -342,6 +342,7 @@ async function checkAndCreateJob(phone, history) {
     '2. The customer has explicitly agreed to a specific time — not just mentioned one\n' +
     '3. That agreement was a direct response to either: (a) KCTVM acknowledging the customer\'s stated time preference, OR (b) KCTVM proposing a specific alternative slot and the customer saying yes/ok/sure/works/etc.\n' +
     'If the customer only mentioned a time without being asked to confirm it, or if the price has not yet been agreed to, set time_confirmed=false.\n\n' +
+    'preferred_time extraction: if an assistant message contains "(time: ISO_TIMESTAMP)" after proposing a slot, use that ISO string as preferred_time — not the human-readable label next to it.\n\n' +
     'If ALL details are present and price is confirmed, respond with JSON only:\n' +
     '{"ready":true,"time_confirmed":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
     'tv_1_inches: use actual inch number from conversation. Under 65=small, 65+=large. Unknown small=52, unknown large=75.\n' +
@@ -389,10 +390,10 @@ async function checkAndCreateJob(phone, history) {
               var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
               var alreadyProposed = lastAssistant && /available|does that work|what time works/i.test(lastAssistant.content);
               if (!alreadyProposed) {
-                var altMsg = 'Hey ' + firstName + ', looks like ' + data.preferred_time + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
-                await addToHistory(phone, 'assistant', altMsg);
-                await sendSMS(phone, altMsg);
-                console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label);
+                var altSmsTxt = 'Hey ' + firstName + ', looks like ' + data.preferred_time + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
+                await addToHistory(phone, 'assistant', altSmsTxt + ' (time: ' + altSlot.raw + ')');
+                await sendSMS(phone, altSmsTxt);
+                console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label + ' (' + altSlot.raw + ')');
               } else {
                 console.log('[checkAndCreateJob] Conflict already proposed in last message — skipping duplicate');
               }
@@ -427,10 +428,10 @@ async function checkAndCreateJob(phone, history) {
           var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
           var alreadyProposedSlot = lastMsg && /available|does that work|what time works/i.test(lastMsg.content);
           if (!alreadyProposedSlot) {
-            var conflictMsg = 'Ah, looks like ' + data.preferred_time + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
-            await addToHistory(phone, 'assistant', conflictMsg);
-            await sendSMS(phone, conflictMsg);
-            console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label + ' to customer');
+            var conflictSmsTxt = 'Ah, looks like ' + data.preferred_time + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
+            await addToHistory(phone, 'assistant', conflictSmsTxt + ' (time: ' + nextSlot.raw + ')');
+            await sendSMS(phone, conflictSmsTxt);
+            console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label + ' (' + nextSlot.raw + ') to customer');
           } else {
             console.log('[checkAndCreateJob] Conflict already proposed in last message — skipping duplicate');
           }
