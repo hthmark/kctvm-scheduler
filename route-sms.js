@@ -122,9 +122,10 @@ router.post('/inbound', async (req, res) => {
 
     // Check if customer is in active workflow waiting for time confirmation
     if (body) {
+      const canonicalPhone = from.startsWith('+') ? from : `+1${normalizedFrom.slice(-10)}`;
       const { data: workflowJobs } = await supabase
         .from('jobs').select('*')
-        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .eq('customer_phone', canonicalPhone)
         .in('status', ['awaiting_time_confirm', 'scheduling_conflict'])
         .order('created_at', { ascending: false })
         .limit(1);

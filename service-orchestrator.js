@@ -199,7 +199,7 @@ async function handleCustomerTimeReply(job, timeText) {
   if (available) {
     const eventId = await createJobEvent(job, parsedDate);
     await updateJob(job.id, { status: 'tech_search', scheduled_time: parsedDate.toISOString(), preferred_time: timeText, calendar_event_id: eventId, tech_search_index: 0, proposed_time: null, proposed_time_label: null });
-    await sendSMS(job.customer_phone, `Got it, ${timeText} — let me check availability and get you confirmed!`);
+    await sendSMS(job.customer_phone, `Perfect! You'll hear back shortly once we confirm your tech.`);
     await dispatchToNextTech(job.id);
   } else {
     await sendSMS(job.customer_phone, `Sorry, ${timeText} is already booked. Do you have another time that works?`);

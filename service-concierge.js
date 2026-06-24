@@ -238,7 +238,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   var slotInstruction = '';
   if (nextSlot) {
     if (nextSlot.exact) {
-      slotInstruction = 'TIME CONFIRMED: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "Perfect, let me check on availability and get right back to you!"\n';
+      slotInstruction = 'TIME CONFIRMED: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "Perfect! You\'ll hear back shortly once we confirm your tech."\n';
     } else {
       slotInstruction = 'EARLIEST AVAILABLE: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
@@ -255,7 +255,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'CRITICAL TIME RULES:\n' +
     '1. Customer requested specific time and it IS available: say "Perfect, let me check on availability and get right back to you!" — NEVER say you\'re putting them down for a time or mention payment links. The orchestrator handles all confirmations.\n' +
     '2. Proposing earliest available time: say "I see we have an opening at [time] — does that work for you?"\n' +
-    '3. When customer confirms earliest time: say "Perfect, let me check on availability and get right back to you!" — same rule, no confirmations from the concierge.\n\n' +
+    '3. When customer confirms earliest time: say "Perfect! You\'ll hear back shortly once we confirm your tech." — same rule, no confirmations from the concierge.\n\n' +
     'CRITICAL SMS RULES:\n' +
     'Your response is sent DIRECTLY as an SMS. No asterisks, no bullet points, no brackets, no bold, no internal notes, no job summaries. Plain conversational text only. Never write anything between ** or [] or - lists.\n' +
     'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
