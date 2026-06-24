@@ -385,10 +385,17 @@ async function checkAndCreateJob(phone, history) {
             var altSlot = null;
             try { altSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
             if (altSlot) {
-              var altMsg = 'Hey ' + firstName + ', looks like ' + data.preferred_time + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
-              await addToHistory(phone, 'assistant', altMsg);
-              await sendSMS(phone, altMsg);
-              console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label);
+              // Only propose if we haven't already proposed a time in the last assistant message
+              var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+              var alreadyProposed = lastAssistant && /available|does that work|what time works/i.test(lastAssistant.content);
+              if (!alreadyProposed) {
+                var altMsg = 'Hey ' + firstName + ', looks like ' + data.preferred_time + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
+                await addToHistory(phone, 'assistant', altMsg);
+                await sendSMS(phone, altMsg);
+                console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label);
+              } else {
+                console.log('[checkAndCreateJob] Conflict already proposed in last message — skipping duplicate');
+              }
             }
           }
         }
@@ -417,10 +424,16 @@ async function checkAndCreateJob(phone, history) {
         var nextSlot = null;
         try { nextSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
         if (nextSlot) {
-          var conflictMsg = 'Ah, looks like ' + data.preferred_time + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
-          await addToHistory(phone, 'assistant', conflictMsg);
-          await sendSMS(phone, conflictMsg);
-          console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label + ' to customer');
+          var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+          var alreadyProposedSlot = lastMsg && /available|does that work|what time works/i.test(lastMsg.content);
+          if (!alreadyProposedSlot) {
+            var conflictMsg = 'Ah, looks like ' + data.preferred_time + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
+            await addToHistory(phone, 'assistant', conflictMsg);
+            await sendSMS(phone, conflictMsg);
+            console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label + ' to customer');
+          } else {
+            console.log('[checkAndCreateJob] Conflict already proposed in last message — skipping duplicate');
+          }
         } else {
           var noSlotMsg = 'Hmm, that time just got taken and I\'m having trouble finding the next open slot. What other time works for you?';
           await addToHistory(phone, 'assistant', noSlotMsg);
