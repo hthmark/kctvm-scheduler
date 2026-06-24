@@ -312,7 +312,15 @@ async function handlePaymentComplete(job, address) {
   await updateJob(job.id, { base_payout: basePayout });
 
   const techMsg = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n\n${tvLines.join('\n')}${supplySection}\n\nBase payout: $${basePayout}\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
-  await sendSMS(tech.phone, techMsg);
+  console.log(`[Orchestrator] Tech msg length: ${techMsg.length} chars | body: ${techMsg}`);
+  if (techMsg.length > 1580) {
+    const part1 = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n\n${tvLines.join('\n')}\n\nBase payout: $${basePayout}`;
+    const part2 = supplySection.trim() + `\n\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
+    await sendSMS(tech.phone, part1);
+    await sendSMS(tech.phone, part2);
+  } else {
+    await sendSMS(tech.phone, techMsg);
+  }
   await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]}! Payment received. ${tech.name.split(' ')[0]} will be there at ${job.preferred_time}. See you then!`);
   console.log(`[Orchestrator] Job ${job.id} confirmed — tech and customer notified`);
 }
