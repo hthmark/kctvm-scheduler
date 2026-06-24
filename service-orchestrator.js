@@ -130,51 +130,58 @@ async function processNewJob(job) {
   }
 }
 
+async function classifyTimeConfirmation(message) {
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const resp = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 5,
+    messages: [{ role: 'user', content: `Does this message confirm acceptance of a proposed appointment time? Reply only YES or NO: ${message}` }],
+  });
+  const answer = resp.content[0].text.trim().toUpperCase();
+  console.log(`[Orchestrator] Time confirmation classification for "${message}": ${answer}`);
+  return answer === 'YES';
+}
+
 async function handleCustomerTimeReply(job, timeText) {
-  const msgLower = timeText.toLowerCase().trim();
-
-  // Handle yes/no reply to a proposed time
-  const isYes = ['yes', 'y', 'yeah', 'yep', 'sure', 'ok', 'okay', 'works', 'perfect', 'sounds good', 'that works', "that'll work", 'great'].some(w => msgLower === w || msgLower.startsWith(w + ' ') || msgLower.endsWith(' ' + w));
-  const isNo = ['no', 'n', 'nope', 'doesnt work', "doesn't work", 'cant', "can't", 'not available', 'no good'].some(w => msgLower === w || msgLower.includes(w));
-
-  if (job.proposed_time && isYes && !isNo) {
-    // Customer accepted the proposed slot
-    const proposedDate = new Date(job.proposed_time);
-    const available = await isTimeAvailable(proposedDate);
-    if (available) {
-      const eventId = await createJobEvent(job, proposedDate);
-      await updateJob(job.id, {
-        status: 'tech_search',
-        scheduled_time: proposedDate.toISOString(),
-        preferred_time: job.proposed_time_label || job.proposed_time,
-        calendar_event_id: eventId,
-        tech_search_index: 0,
-        proposed_time: null,
-        proposed_time_label: null
-      });
-      await sendSMS(job.customer_phone, `Perfect! Let me get a tech confirmed for you and I'll send over a payment link shortly.`);
-      await dispatchToNextTech(job.id);
-      return;
-    } else {
-      // Slot got taken in the meantime — find another
-      const { findNextAvailableTime } = require('./service-calendar');
-      const nextSlot = await findNextAvailableTime(null).catch(() => null);
-      if (nextSlot) {
-        await sendSMS(job.customer_phone, `Ah sorry, that slot just got taken! How about ${nextSlot.label} instead?`);
-        await updateJob(job.id, { proposed_time: nextSlot.time.toISOString(), proposed_time_label: nextSlot.label });
+  if (job.proposed_time) {
+    const isConfirm = await classifyTimeConfirmation(timeText).catch(() => null);
+    if (isConfirm === true) {
+      // Customer accepted the proposed slot
+      const proposedDate = new Date(job.proposed_time);
+      const available = await isTimeAvailable(proposedDate);
+      if (available) {
+        const eventId = await createJobEvent(job, proposedDate);
+        await updateJob(job.id, {
+          status: 'tech_search',
+          scheduled_time: proposedDate.toISOString(),
+          preferred_time: job.proposed_time_label || job.proposed_time,
+          calendar_event_id: eventId,
+          tech_search_index: 0,
+          proposed_time: null,
+          proposed_time_label: null
+        });
+        await sendSMS(job.customer_phone, `Perfect! Let me get a tech confirmed for you and I'll send over a payment link shortly.`);
+        await dispatchToNextTech(job.id);
       } else {
-        await sendSMS(job.customer_phone, `Sorry about that — what day and time works best for you?`);
-        await updateJob(job.id, { proposed_time: null, proposed_time_label: null });
+        // Slot got taken in the meantime — find another
+        const { findNextAvailableTime } = require('./service-calendar');
+        const nextSlot = await findNextAvailableTime(null).catch(() => null);
+        if (nextSlot) {
+          await sendSMS(job.customer_phone, `Ah sorry, that slot just got taken! How about ${nextSlot.label} instead?`);
+          await updateJob(job.id, { proposed_time: nextSlot.time.toISOString(), proposed_time_label: nextSlot.label });
+        } else {
+          await sendSMS(job.customer_phone, `Sorry about that — what day and time works best for you?`);
+          await updateJob(job.id, { proposed_time: null, proposed_time_label: null });
+        }
       }
       return;
+    } else {
+      // Customer declined the proposed slot — ask for their preference
+      await sendSMS(job.customer_phone, `No problem! What time works better for you?`);
+      await updateJob(job.id, { status: 'scheduling', proposed_time: null, proposed_time_label: null });
+      return;
     }
-  }
-
-  if (job.proposed_time && isNo) {
-    // Customer declined the proposed slot — ask for their preference
-    await sendSMS(job.customer_phone, `No worries! What day and time works best for you?`);
-    await updateJob(job.id, { proposed_time: null, proposed_time_label: null });
-    return;
   }
 
   // Customer sent a specific time
