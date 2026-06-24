@@ -120,7 +120,7 @@ async function processNewJob(job) {
       // Calendar conflict — find next available slot and text customer
       console.log(`[Orchestrator] Conflict at "${job.preferred_time}" — finding next available slot`);
       const { findNextAvailableTime } = require('./service-calendar');
-      const nextSlot = await findNextAvailableTime(null).catch((e) => { console.error('[Orchestrator] findNextAvailableTime ERROR:', e.message); return null; });
+      const nextSlot = await findNextAvailableTime(job.preferred_time).catch((e) => { console.error('[Orchestrator] findNextAvailableTime ERROR:', e.message); return null; });
       console.log(`[Orchestrator] findNextAvailableTime result: ${nextSlot ? nextSlot.label : 'null'}`);
       const firstName = job.customer_name ? job.customer_name.split(' ')[0] : 'there';
       if (nextSlot) {
