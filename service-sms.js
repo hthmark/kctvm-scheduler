@@ -42,7 +42,11 @@ async function sendSMS(to, body) {
     return result;
 
   } catch (err) {
-    console.error(`[SMS] Send failed to ${phone}:`, err.message);
+    if (err.response) {
+      console.error(`[SMS] Send failed to ${phone}: HTTP ${err.response.status} — ${JSON.stringify(err.response.data)}`);
+    } else {
+      console.error(`[SMS] Send failed to ${phone}:`, err.message);
+    }
     return { success: false, error: err.message };
   }
 }
