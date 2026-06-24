@@ -83,27 +83,45 @@ async function updateJob(jobId, updates) {
 }
 
 async function processNewJob(job) {
-  console.log(`[Orchestrator] Processing new job ${job.id} for ${job.customer_name}`);
+  console.log(`[Orchestrator] processNewJob START — job ${job.id} preferred_time="${job.preferred_time}"`);
   await updateJob(job.id, { status: 'scheduling' });
+  console.log(`[Orchestrator] updateJob → scheduling (job ${job.id})`);
+
   const preferredDate = attemptDateParse(job.preferred_time);
+  console.log(`[Orchestrator] attemptDateParse result: ${preferredDate ? preferredDate.toISOString() : 'null'} (future: ${preferredDate ? preferredDate > new Date() : false})`);
+
   if (preferredDate && preferredDate > new Date()) {
-    const available = await isTimeAvailable(preferredDate);
+    let available = false;
+    try {
+      available = await isTimeAvailable(preferredDate);
+      console.log(`[Orchestrator] isTimeAvailable(${preferredDate.toISOString()}) → ${available}`);
+    } catch (calErr) {
+      console.error(`[Orchestrator] isTimeAvailable ERROR for job ${job.id}:`, calErr.message, calErr.stack);
+    }
+
     if (available) {
+      console.log(`[Orchestrator] Time available — creating calendar event`);
       const eventId = await createJobEvent(job, preferredDate);
+      console.log(`[Orchestrator] Calendar event created: ${eventId}`);
       await updateJob(job.id, { status: 'tech_search', scheduled_time: preferredDate.toISOString(), calendar_event_id: eventId, tech_search_index: 0 });
+      console.log(`[Orchestrator] updateJob → tech_search (job ${job.id})`);
+
       const { outOfRangeTVs } = buildSupplyList(job);
       if (outOfRangeTVs.length > 0) {
         const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum}`).join(', ');
+        console.log(`[Orchestrator] Out-of-range TVs detected: ${tvNums} — holding for manual review`);
         await updateJob(job.id, { status: 'awaiting_time_confirm' });
-        console.log(`[Orchestrator] Job ${job.id} awaiting time confirm — no automated text sent, concierge handles this`);
+        console.log(`[Orchestrator] updateJob → awaiting_time_confirm (out-of-range TVs, job ${job.id})`);
         return;
       }
+      console.log(`[Orchestrator] No out-of-range TVs — dispatching to tech`);
       await dispatchToNextTech(job.id);
     } else {
       // Calendar conflict — find next available slot and text customer
-      console.log(`[Orchestrator] Conflict at ${job.preferred_time} — finding next available slot`);
+      console.log(`[Orchestrator] Conflict at "${job.preferred_time}" — finding next available slot`);
       const { findNextAvailableTime } = require('./service-calendar');
-      const nextSlot = await findNextAvailableTime(null).catch(() => null);
+      const nextSlot = await findNextAvailableTime(null).catch((e) => { console.error('[Orchestrator] findNextAvailableTime ERROR:', e.message); return null; });
+      console.log(`[Orchestrator] findNextAvailableTime result: ${nextSlot ? nextSlot.label : 'null'}`);
       const firstName = job.customer_name ? job.customer_name.split(' ')[0] : 'there';
       if (nextSlot) {
         await sendSMS(job.customer_phone,
@@ -114,20 +132,22 @@ async function processNewJob(job) {
           proposed_time: nextSlot.time.toISOString(),
           proposed_time_label: nextSlot.label
         });
-        console.log(`[Orchestrator] Proposed ${nextSlot.label} to customer for job ${job.id}`);
+        console.log(`[Orchestrator] updateJob → awaiting_time_confirm with proposed_time=${nextSlot.time.toISOString()} (job ${job.id})`);
       } else {
         await sendSMS(job.customer_phone,
           `Hey ${firstName}, the time you requested isn't available unfortunately. What other day and time works for you?`
         );
         await updateJob(job.id, { status: 'awaiting_time_confirm' });
+        console.log(`[Orchestrator] updateJob → awaiting_time_confirm (no slot found, job ${job.id})`);
       }
     }
   } else {
     await updateJob(job.id, { status: 'awaiting_time_confirm' });
-    console.log(`[Orchestrator] Job ${job.id} awaiting time confirm — no automated text sent, concierge handles this`);
+    console.log(`[Orchestrator] updateJob → awaiting_time_confirm (unparseable/past time, job ${job.id})`);
     // Schedule follow-up if no response in 3 hours
     setTimeout(() => sendFollowUp(job.id), 3 * 60 * 60 * 1000);
   }
+  console.log(`[Orchestrator] processNewJob END — job ${job.id}`);
 }
 
 async function classifyTimeConfirmation(message) {
