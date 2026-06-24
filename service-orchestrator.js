@@ -9,6 +9,18 @@ const TECH_TIMEOUT_MS = (parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 30)
 const GOOGLE_REVIEW_URL = 'https://g.page/r/CWmvZghawMfzEBM/review';
 const OWNER_PHONE = process.env.OWNER_PHONE || '+13862287246';
 
+function formatPreferredTime(preferredTime) {
+  if (!preferredTime) return preferredTime;
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(preferredTime)) return preferredTime;
+  const d = new Date(preferredTime);
+  if (isNaN(d.getTime())) return preferredTime;
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  });
+}
+
 // ─── WALMART MOUNT LINKS ─────────────────────────────────────────────────────
 const MOUNT_LINKS = {
   fixed: {
@@ -153,10 +165,9 @@ async function techAccepted(job, techId) {
   if (job.calendar_event_id) await confirmJobEvent(job.calendar_event_id, tech.name);
   const paymentUrl = await createPaymentLink(job);
   await updateJob(job.id, { status: 'awaiting_payment', confirmed_tech_id: techId, confirmed_tech_name: tech.name, stripe_payment_link: paymentUrl, payment_link_sent_at: new Date().toISOString() });
-  const confirmedDate = job.scheduled_time ? new Date(job.scheduled_time).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'numeric', day: 'numeric', year: 'numeric' }) : '';
-  await sendSMS(tech.phone, `Great, you're confirmed for the job in ${job.city} at ${job.preferred_time}${confirmedDate ? ' (' + confirmedDate + ')' : ''}! We'll send you the full address and supply list once the customer pays. Thanks ${tech.name.split(' ')[0]}!`);
-  const jobDate = job.scheduled_time ? new Date(job.scheduled_time).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'numeric', day: 'numeric', year: 'numeric' }) : '';
-  await sendSMS(job.customer_phone, `Great news, ${job.customer_name.split(' ')[0]}! Your TV mounting is confirmed for ${job.preferred_time}${jobDate ? ' (' + jobDate + ')' : ''} with ${tech.name.split(' ')[0]}. Please complete payment and provide your full installation address here: ${paymentUrl}`);
+  const displayTime = formatPreferredTime(job.preferred_time);
+  await sendSMS(tech.phone, `Great, you're confirmed for the job in ${job.city} at ${displayTime}! We'll send you the full address and supply list once the customer pays. Thanks ${tech.name.split(' ')[0]}!`);
+  await sendSMS(job.customer_phone, `Great news, ${job.customer_name.split(' ')[0]}! Your TV mounting is confirmed for ${displayTime} with ${tech.name.split(' ')[0]}. Please complete payment and provide your full installation address here: ${paymentUrl}`);
   setTimeout(() => checkPaymentReminder(job.id, '2hr'), 2 * 60 * 60 * 1000);
 }
 
