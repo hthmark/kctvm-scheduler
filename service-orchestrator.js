@@ -409,4 +409,4 @@ async function sendFollowUp(jobId) {
   console.log(`[Orchestrator] Follow-up sent to ${job.customer_name} — marked permanently`);
 }
 
-module.exports = { processNewJob, handleCustomerTimeReply, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech };
+module.exports = { processNewJob, handleCustomerTimeReply, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout };
