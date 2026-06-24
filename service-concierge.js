@@ -366,6 +366,33 @@ async function checkAndCreateJob(phone, history) {
 
     if (!data.time_confirmed) {
       console.log('[checkAndCreateJob] BLOCKED — time not yet confirmed by customer');
+      // Use this opportunity to proactively check availability and prompt customer to confirm
+      if (data.preferred_time) {
+        var calModCheck = require('./service-calendar');
+        var parsedCheck = calModCheck.attemptDateParse(data.preferred_time);
+        if (parsedCheck && parsedCheck > new Date()) {
+          var checkAvail = false;
+          try { checkAvail = await calModCheck.isTimeAvailable(parsedCheck); } catch(e) {
+            console.error('[checkAndCreateJob] Pre-confirm calendar check error:', e.message);
+          }
+          var firstName = data.name ? data.name.split(' ')[0] : 'there';
+          if (checkAvail) {
+            var confirmMsg = 'Great news — ' + data.preferred_time + ' is available! Does that work for you?';
+            await addToHistory(phone, 'assistant', confirmMsg);
+            await sendSMS(phone, confirmMsg);
+            console.log('[checkAndCreateJob] Time available — asked customer to confirm: ' + data.preferred_time);
+          } else {
+            var altSlot = null;
+            try { altSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
+            if (altSlot) {
+              var altMsg = 'Hey ' + firstName + ', looks like ' + data.preferred_time + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
+              await addToHistory(phone, 'assistant', altMsg);
+              await sendSMS(phone, altMsg);
+              console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label);
+            }
+          }
+        }
+      }
       return false;
     }
 
