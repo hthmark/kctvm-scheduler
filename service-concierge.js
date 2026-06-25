@@ -47,8 +47,8 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'EXAMPLE: TV1=50" fixed mount brick wire ($140+$60+$150+$150=$500), TV2=40" own mount drywall no wire ($70) → Total $570\n' +
   'When quoting, always show the breakdown per TV then the total. Ask "unless you have your own mount?" when a mount is needed.\n' +
   'We do NOT install new outlets. If no outlet on the wall, ask if they are flexible on TV placement.\n' +
-  '- TVs 65" or larger: Must confirm someone can help with the lift before booking.\n' +
-  '  Ask: "Just a heads up - since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n' +
+  'IMPORTANT: The lift question must never appear in the same message as the price quote. Quote price first, wait for price confirmation, then ask about the lift.\n' +
+  '- TVs 65" or larger: After mount type is confirmed and price is quoted, ask: "Just a heads up — since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n' +
   '  If no one can help with lift: say "Let me get Gabe on this for you" and route to manual.\n\n' +
   'TV SIZE IDENTIFICATION:\n' +
   '- If customer does not know their TV size, say: "There\'s generally a serial, model and make white sticker on the back of the TV. If you\'re able to send that over or take a photo of it I can help you determine the size and which mount would work best!"\n' +
