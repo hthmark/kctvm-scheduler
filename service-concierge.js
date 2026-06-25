@@ -70,13 +70,15 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'Before confirming wire concealment for any TV, you MUST ask: "Just to confirm — is there an outlet below or near where the TV will be mounted?" Do not proceed to price confirmation until this is answered.\n' +
   'If customer says NO outlet: "Unfortunately we need an existing outlet on the wall below the TV to conceal the wires, so we wouldn\'t be able to do wire concealment in that case — but we can still mount the TV!"\n' +
   'If customer says YES: proceed normally.\n\n' +
+  'MOUNT TYPE — MUST ASK BEFORE PRICING:\n' +
+  'If the customer says they need a mount (or does not have their own mount) and has NOT already said "fixed" or "articulating", you MUST ask: "Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?" before calculating or quoting any price. Do NOT skip this question for any reason — not because the TV is large, not because the mount needs to be ordered online, not for any other condition. Mount type must be confirmed by the customer before any price is quoted.\n\n' +
   'MOUNT INVENTORY — AVAILABLE IN STOCK:\n' +
   '- Fixed mount: covers 32"–110" (available)\n' +
   '- Articulating mount: covers 32"–86" (available)\n' +
   'OUT OF STOCK (must order online, ~2-day delay):\n' +
   '- Articulating mount for TVs over 86"\n' +
   '- Fixed mount for TVs over 110"\n' +
-  'If a customer needs a mount we source and their TV is outside the available range: first confirm the mount type if not already known (ask "Would you want a fixed mount or an articulating one?"). Then in the SAME MESSAGE as the price quote, include: "Just a heads up — since your TV is [size]\", we\'d need to order that mount online which pushes the install out about 2 days." Do NOT send the heads-up as a separate message. Use standard prices ($60 fixed, $120 articulating) — no surcharge for the special order.\n' +
+  'If a customer needs a mount we source and their TV is outside the available range: once mount type is confirmed, include the online order notice in the SAME MESSAGE as the price quote: "Just a heads up — since your TV is [size]\", we\'d need to order that mount online which pushes the install out about 2 days." Do NOT send the heads-up as a separate message. Use standard prices ($60 fixed, $120 articulating) — no surcharge for the special order.\n' +
   'If yes: proceed normally, note the delay in the job.\n' +
   'If no: "No worries! You\'re welcome to source your own mount and we\'ll install it — that would bring the price down to just the labor."\n\n' +
   'CRITICAL LABOR RULE: $140 is ONLY for TVs strictly under 65". Any TV 65" or larger (65", 75", 85", 86", 96", 100", etc.) MUST use $160 for TV #1 labor. Never use $140 for a large TV. A 96" TV = $160 labor, NOT $140.\n\n' +
