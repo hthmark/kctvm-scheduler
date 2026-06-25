@@ -439,7 +439,7 @@ async function checkAndCreateJob(phone, history) {
     '- If tv_N_mount="yes" customer has own mount — NO mount add-on cost\n' +
     'Example: TV1=55" own mount drywall no wire = $140. TV2=75" articulating drywall wire = $80+$120+$150 = $350. Total = $490.\n\n' +
     'TIME CONFIRMATION RULES — set time_confirmed=true ONLY when ALL of these are true:\n' +
-    '1. The customer has already agreed to the total price earlier in the conversation (not just been quoted it)\n' +
+    '1. The customer has already agreed to the total price earlier in the conversation (not just been quoted it). A customer reply of "yes to both", "yes to all", "both yes", "yep both", or any clear affirmative to multiple questions at once (e.g. price + lift question asked together) counts as price confirmation — do NOT require a standalone yes to the price question alone.\n' +
     '2. The customer has explicitly agreed to a specific time — not just mentioned one\n' +
     '3. That agreement was a direct response to either: (a) KCTVM acknowledging the customer\'s stated time preference, OR (b) KCTVM proposing a specific alternative slot and the customer saying yes/ok/sure/works/etc., OR (c) KCTVM sent a bare-time confirm like "2pm today?" or "11am tomorrow?" as an entire message and the customer replied yes/yeah/yep/ok/sure/works/sounds good/perfect.\n' +
     'If customer only mentioned a time without being asked to confirm it, or if price has not yet been agreed to, set time_confirmed=false.\n' +
