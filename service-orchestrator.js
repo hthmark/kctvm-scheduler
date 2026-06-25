@@ -249,7 +249,7 @@ async function handlePaymentComplete(job, address) {
   } else {
     await sendSMS(tech.phone, techMsg);
   }
-  await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]}! Payment received. ${tech.name.split(' ')[0]} will be there at ${job.preferred_time}. See you then!`);
+  await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]}! Payment received. ${tech.name.split(' ')[0]} will be there at ${formatPreferredTime(job.preferred_time)}. See you then!`);
   console.log(`[Orchestrator] Job ${job.id} confirmed — tech and customer notified`);
 }
 
@@ -314,7 +314,7 @@ async function cancelJob(jobId, reason) {
   if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
   if (job.confirmed_tech_id) {
     const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
-    if (tech) await sendSMS(tech.phone, `Hi ${tech.name.split(' ')[0]}, the ${job.city} job on ${job.preferred_time} has been cancelled. Sorry for the inconvenience!`);
+    if (tech) await sendSMS(tech.phone, `Hi ${tech.name.split(' ')[0]}, the ${job.city} job on ${formatPreferredTime(job.preferred_time)} has been cancelled. Sorry for the inconvenience!`);
   }
 }
 

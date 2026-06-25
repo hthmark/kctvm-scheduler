@@ -10,6 +10,23 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const OWNER_PHONE = process.env.OWNER_PHONE || '+13862287246';
 
+function formatTimeForSMS(isoString) {
+  if (!isoString) return isoString;
+  var date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+  // Only format if it looks like an ISO string — pass natural language through unchanged
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(isoString)) return isoString;
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    weekday: 'short',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
 const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'LABOR (per TV):\n' +
   '- TV #1 under 65": $140\n' +
@@ -378,7 +395,7 @@ async function checkAndCreateJob(phone, history) {
           }
           var firstName = data.name ? data.name.split(' ')[0] : 'there';
           if (checkAvail) {
-            var confirmMsg = 'Great news — ' + data.preferred_time + ' is available! Does that work for you?';
+            var confirmMsg = 'Great news — ' + formatTimeForSMS(data.preferred_time) + ' is available! Does that work for you?';
             await addToHistory(phone, 'assistant', confirmMsg);
             await sendSMS(phone, confirmMsg);
             console.log('[checkAndCreateJob] Time available — asked customer to confirm: ' + data.preferred_time);
@@ -390,7 +407,7 @@ async function checkAndCreateJob(phone, history) {
               var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
               var alreadyProposed = lastAssistant && /available|does that work|what time works/i.test(lastAssistant.content);
               if (!alreadyProposed) {
-                var altSmsTxt = 'Hey ' + firstName + ', looks like ' + data.preferred_time + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
+                var altSmsTxt = 'Hey ' + firstName + ', looks like ' + formatTimeForSMS(data.preferred_time) + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
                 await addToHistory(phone, 'assistant', altSmsTxt + ' (time: ' + altSlot.raw + ')');
                 await sendSMS(phone, altSmsTxt);
                 console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label + ' (' + altSlot.raw + ')');
@@ -428,7 +445,7 @@ async function checkAndCreateJob(phone, history) {
           var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
           var alreadyProposedSlot = lastMsg && /available|does that work|what time works/i.test(lastMsg.content);
           if (!alreadyProposedSlot) {
-            var conflictSmsTxt = 'Ah, looks like ' + data.preferred_time + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
+            var conflictSmsTxt = 'Ah, looks like ' + formatTimeForSMS(data.preferred_time) + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
             await addToHistory(phone, 'assistant', conflictSmsTxt + ' (time: ' + nextSlot.raw + ')');
             await sendSMS(phone, conflictSmsTxt);
             console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label + ' (' + nextSlot.raw + ') to customer');
