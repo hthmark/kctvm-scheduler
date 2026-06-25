@@ -219,23 +219,19 @@ async function findNextAvailableTime(requestedTime) {
     candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
   }
 
-  const getChicagoHour = (d) => {
-    const str = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: true });
-    const match = str.match(/(\d+):?(\d*)\s*(AM|PM)/i);
-    if (!match) return 12;
-    let h = parseInt(match[1]);
-    const ampm = match[3].toUpperCase();
-    if (ampm === 'PM' && h !== 12) h += 12;
-    if (ampm === 'AM' && h === 12) h = 0;
-    return h;
+  const getChicagoMinutes = (d) => {
+    const parts = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+    const m = parts.match(/(\d+):(\d+)/);
+    if (!m) return 720;
+    return parseInt(m[1]) * 60 + parseInt(m[2]);
   };
 
   let safetyCount = 0;
   while (safetyCount++ < 48) {
-    const hour = getChicagoHour(candidate);
-    if (hour >= 8 && hour < 19) break;
+    const mins = getChicagoMinutes(candidate);
+    if (mins >= 8 * 60 && mins <= 19 * 60) break;
     const nextDay = new Date(candidate);
-    nextDay.setDate(nextDay.getDate() + (hour >= 19 ? 1 : 0));
+    nextDay.setDate(nextDay.getDate() + (mins > 19 * 60 ? 1 : 0));
     const dateStr = nextDay.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
     const parts = dateStr.split('/');
     candidate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), 8, 0, 0, 0);

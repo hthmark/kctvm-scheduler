@@ -166,31 +166,25 @@ async function findNextAvailableTime(requestedTime) {
   } else {
     candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
   }
-  // Enforce business hours 8am-7pm KC time, 7 days a week
-  var getChicagoHour = function(d) {
-    var str = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: true });
-    var match = str.match(/(\d+):?(\d*)\s*(AM|PM)/i);
-    if (!match) return 12;
-    var h = parseInt(match[1]);
-    var ampm = match[3].toUpperCase();
-    if (ampm === 'PM' && h !== 12) h += 12;
-    if (ampm === 'AM' && h === 12) h = 0;
-    return h;
+  // Enforce business hours 8am–7pm KC time (last start 7:00 PM, job ends 8:30 PM)
+  var getChicagoMinutes = function(d) {
+    var parts = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+    var m = parts.match(/(\d+):(\d+)/);
+    if (!m) return 720;
+    return parseInt(m[1]) * 60 + parseInt(m[2]);
   };
   var safetyCount = 0;
   while (safetyCount++ < 48) {
-    var hour = getChicagoHour(candidate);
-    if (hour >= 8 && hour < 19) break;
-    if (hour >= 19 || hour < 8) {
-      // Move to next day 8am KC time
-      var nextDay = new Date(candidate);
-      nextDay.setDate(nextDay.getDate() + (hour >= 19 ? 1 : 0));
-      var dateStr = nextDay.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
-      var parts = dateStr.split('/');
-      candidate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), 8, 0, 0, 0);
-      var offset = new Date(candidate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-      candidate = new Date(candidate.getTime() + (candidate - offset));
-    }
+    var mins = getChicagoMinutes(candidate);
+    if (mins >= 8 * 60 && mins <= 19 * 60) break;
+    // Outside window — jump to next day 8am KC time
+    var nextDay = new Date(candidate);
+    nextDay.setDate(nextDay.getDate() + (mins > 19 * 60 ? 1 : 0));
+    var dateStr = nextDay.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+    var parts = dateStr.split('/');
+    candidate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), 8, 0, 0, 0);
+    var offset = new Date(candidate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    candidate = new Date(candidate.getTime() + (candidate - offset));
   }
 
   for (var i = 0; i < 20; i++) {
@@ -457,9 +451,38 @@ async function checkAndCreateJob(phone, history) {
       return false;
     }
 
-    // Calendar check before creating the job
+    // Business-hours guard — last bookable start is 7:00 PM KC (jobs finish 8:30 PM)
     var calMod = require('./service-calendar');
     var parsedDate = calMod.attemptDateParse(data.preferred_time);
+    if (parsedDate) {
+      var chicagoTimeParts = parsedDate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+      var chicagoMatch = chicagoTimeParts.match(/(\d+):(\d+)/);
+      if (chicagoMatch) {
+        var chicagoMins = parseInt(chicagoMatch[1]) * 60 + parseInt(chicagoMatch[2]);
+        if (chicagoMins > 19 * 60 || chicagoMins < 8 * 60) {
+          console.log('[checkAndCreateJob] After-hours time (' + chicagoTimeParts + ') — redirecting to next available morning slot');
+          var morningSlot = null;
+          try { morningSlot = await findNextAvailableTime(null); } catch(e) {}
+          var lastMsgAH = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+          var alreadyProposedAH = lastMsgAH && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastMsgAH.content);
+          if (!alreadyProposedAH) {
+            var afterHoursMsg = morningSlot
+              ? 'Ah, we stop taking bookings after 7pm — but I have ' + morningSlot.label + ' available. Does that work for you?'
+              : "We stop taking bookings after 7pm. What morning or afternoon time works for you?";
+            if (morningSlot) {
+              await addToHistory(phone, 'assistant', afterHoursMsg + ' (time: ' + morningSlot.raw + ')');
+            } else {
+              await addToHistory(phone, 'assistant', afterHoursMsg);
+            }
+            await sendSMS(phone, afterHoursMsg);
+          }
+          return false;
+        }
+      }
+    }
+
+    // Calendar check before creating the job
+    // (parsedDate already set above)
     if (parsedDate && parsedDate > new Date()) {
       var slotAvailable = false;
       try { slotAvailable = await calMod.isTimeAvailable(parsedDate); } catch(e) {
