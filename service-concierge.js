@@ -135,6 +135,37 @@ async function identifyCustomer(phone) {
   return { type: 'new', job: null };
 }
 
+async function findFirstSlotTomorrow() {
+  var calMod = require('./service-calendar');
+  var kcTomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-US', {
+    timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+  var tParts = kcTomorrow.split('/');
+  var tomorrowLocal = new Date(parseInt(tParts[2]), parseInt(tParts[0]) - 1, parseInt(tParts[1]), 7, 0, 0, 0);
+  var tOffset = new Date(tomorrowLocal.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  var candidate = new Date(tomorrowLocal.getTime() + (tomorrowLocal - tOffset));
+
+  for (var i = 0; i < 15; i++) {
+    var available = false;
+    try { available = await calMod.isTimeAvailable(candidate, 120); } catch(e) { break; }
+    if (available) {
+      return {
+        time: candidate,
+        label: candidate.toLocaleString('en-US', {
+          timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+          hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
+        }),
+        raw: candidate.toISOString()
+      };
+    }
+    candidate = new Date(candidate.getTime() + 90 * 60 * 1000);
+    var minStr = candidate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+    var minM = minStr.match(/(\d+):(\d+)/);
+    if (minM && parseInt(minM[1]) * 60 + parseInt(minM[2]) > 19 * 60) break;
+  }
+  return null;
+}
+
 async function findNextAvailableTime(requestedTime) {
   var calendarModule = require('./service-calendar');
   var isTimeAvailable = calendarModule.isTimeAvailable;
@@ -168,10 +199,16 @@ async function findNextAvailableTime(requestedTime) {
           return { time: parsed, label: timeStr, raw: parsed.toISOString(), exact: true };
         }
       } else {
-        console.log('[Concierge] Requested time ' + parsed.toISOString() + ' is outside business hours (' + reqMins + ' mins) — finding next morning slot');
+        console.log('[Concierge] Requested time ' + parsed.toISOString() + ' is outside business hours (' + reqMins + ' mins) — returning first slot tomorrow');
         isAfterHoursRequest = true;
       }
     }
+  }
+
+  if (isAfterHoursRequest) {
+    var tSlot = await findFirstSlotTomorrow().catch(() => null);
+    if (tSlot) return { time: tSlot.time, label: tSlot.label, raw: tSlot.raw, exact: false, afterHours: true };
+    return null;
   }
 
   var now = new Date();
@@ -280,7 +317,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     if (nextSlot.exact) {
       slotInstruction = 'TIME AVAILABLE: The customer\'s requested time ' + nextSlot.label + ' IS available (ISO: ' + nextSlot.raw + '). Ask them to confirm it — for bare times (no day) use the BARE TIME HANDLING rule above. For times with a day, say: "Does ' + nextSlot.label + ' work for you?" Use the ISO time as preferred_time in job submission once confirmed.\n';
     } else if (nextSlot.afterHours) {
-      slotInstruction = 'AFTER-HOURS REQUEST: The customer requested a time outside our 7 AM–7 PM business hours. Do NOT say it is "taken" or "unavailable." Say EXACTLY: "Unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The next available time I have is ' + nextSlot.label + '." Then stop — let them respond. Use ISO ' + nextSlot.raw + ' as preferred_time once they confirm.\n';
+      slotInstruction = 'AFTER-HOURS REQUEST: The customer requested a time outside our 7 AM–7 PM business hours. Do NOT say the time is "taken," "unavailable," or imply a scheduling conflict. Say EXACTLY (using their first name if you know it): "Hey [name], unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + nextSlot.label + '. Does that work for you?" Use ISO ' + nextSlot.raw + ' as preferred_time once they confirm.\n';
     } else {
       slotInstruction = 'EARLIEST AVAILABLE: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
@@ -418,11 +455,31 @@ async function checkAndCreateJob(phone, history) {
         var calModCheck = require('./service-calendar');
         var parsedCheck = calModCheck.attemptDateParse(data.preferred_time);
         if (parsedCheck && parsedCheck > new Date()) {
+          var firstName = data.name ? data.name.split(' ')[0] : 'there';
+
+          // Business-hours check FIRST — never let after-hours times reach the calendar check
+          var checkParts = parsedCheck.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+          var checkMinsM = checkParts.match(/(\d+):(\d+)/);
+          var checkMins = checkMinsM ? parseInt(checkMinsM[1]) * 60 + parseInt(checkMinsM[2]) : 720;
+          if (checkMins > 19 * 60 || checkMins < 7 * 60) {
+            console.log('[checkAndCreateJob] Pre-confirm after-hours time (' + checkParts + ') — redirecting to tomorrow morning');
+            var tSlotPC = await findFirstSlotTomorrow().catch(() => null);
+            var lastAsstPC = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+            var alreadyProposedPC = lastAsstPC && /7 AM to 7 PM|late for us/i.test(lastAsstPC.content);
+            if (!alreadyProposedPC) {
+              var ahMsgPC = tSlotPC
+                ? 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + tSlotPC.label + '. Does that work for you?'
+                : 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. What morning time works for you?';
+              await addToHistory(phone, 'assistant', tSlotPC ? ahMsgPC + ' (time: ' + tSlotPC.raw + ')' : ahMsgPC);
+              await sendSMS(phone, ahMsgPC);
+            }
+            return false;
+          }
+
           var checkAvail = false;
           try { checkAvail = await calModCheck.isTimeAvailable(parsedCheck); } catch(e) {
             console.error('[checkAndCreateJob] Pre-confirm calendar check error:', e.message);
           }
-          var firstName = data.name ? data.name.split(' ')[0] : 'there';
           if (checkAvail) {
             // Concierge owns the customer-facing confirmation message — it already asked via the system
             // prompt slotInstruction. We only record the ISO here so the extractor can use it on the
@@ -447,7 +504,7 @@ async function checkAndCreateJob(phone, history) {
               var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
               var alreadyProposed = lastAssistant && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastAssistant.content);
               if (!alreadyProposed) {
-                var altSmsTxt = 'Hey ' + firstName + ', looks like ' + formatTimeForSMS(data.preferred_time) + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
+                var altSmsTxt = 'Ah, looks like ' + formatTimeForSMS(data.preferred_time) + ' just got taken! I do have ' + altSlot.label + ' available though — does that work for you?';
                 await addToHistory(phone, 'assistant', altSmsTxt + ' (time: ' + altSlot.raw + ')');
                 await sendSMS(phone, altSmsTxt);
                 console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label + ' (' + altSlot.raw + ')');
@@ -477,21 +534,17 @@ async function checkAndCreateJob(phone, history) {
       var chicagoMatch = chicagoTimeParts.match(/(\d+):(\d+)/);
       if (chicagoMatch) {
         var chicagoMins = parseInt(chicagoMatch[1]) * 60 + parseInt(chicagoMatch[2]);
-        if (chicagoMins > 19 * 60 || chicagoMins < 8 * 60) {
-          console.log('[checkAndCreateJob] After-hours time (' + chicagoTimeParts + ') — redirecting to next available morning slot');
-          var morningSlot = null;
-          try { morningSlot = await findNextAvailableTime(null); } catch(e) {}
+        if (chicagoMins > 19 * 60 || chicagoMins < 7 * 60) {
+          console.log('[checkAndCreateJob] After-hours time (' + chicagoTimeParts + ') — redirecting to tomorrow morning');
+          var firstName = data.name ? data.name.split(' ')[0] : 'there';
+          var morningSlot = await findFirstSlotTomorrow().catch(() => null);
           var lastMsgAH = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-          var alreadyProposedAH = lastMsgAH && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastMsgAH.content);
+          var alreadyProposedAH = lastMsgAH && /7 AM to 7 PM|late for us/i.test(lastMsgAH.content);
           if (!alreadyProposedAH) {
             var afterHoursMsg = morningSlot
-              ? 'Unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The next available time I have is ' + morningSlot.label + '.'
-              : "Unfortunately that's a little late for us — we run 7 AM to 7 PM. What morning or afternoon time works for you?";
-            if (morningSlot) {
-              await addToHistory(phone, 'assistant', afterHoursMsg + ' (time: ' + morningSlot.raw + ')');
-            } else {
-              await addToHistory(phone, 'assistant', afterHoursMsg);
-            }
+              ? 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + morningSlot.label + '. Does that work for you?'
+              : 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. What morning time works for you?';
+            await addToHistory(phone, 'assistant', morningSlot ? afterHoursMsg + ' (time: ' + morningSlot.raw + ')' : afterHoursMsg);
             await sendSMS(phone, afterHoursMsg);
           }
           return false;
