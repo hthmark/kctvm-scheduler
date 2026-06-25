@@ -353,6 +353,20 @@ function hasDay(text) {
   return /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2})\b/i.test(text);
 }
 
+async function handleLateCancellation(job, techId) {
+  const firstName = job.customer_name.split(' ')[0];
+  if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
+  await updateJob(job.id, {
+    status: 'tech_search',
+    confirmed_tech_id: null,
+    confirmed_tech_name: null,
+    tech_search_index: (job.tech_search_index || 0) + 1,
+  });
+  await sendSMS(job.customer_phone, `Hey ${firstName}, we had a tech conflict come up — we're getting you a replacement and will confirm your time shortly. Sorry for the inconvenience!`);
+  console.log(`[Orchestrator] Late cancellation by tech ${techId} on job ${job.id} — re-dispatching`);
+  await dispatchToNextTech(job.id);
+}
+
 async function handleRescheduleRequest(job, messageText) {
   const newDate = attemptDateParse(messageText);
 
@@ -463,4 +477,4 @@ async function handleRescheduleReply(job, techId, reply) {
   }
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation };

@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -82,7 +82,7 @@ router.post('/inbound', async (req, res) => {
           await handleTechReply(pendingJob.id, tech.id, 'no');
         } else {
           const { sendSMS } = require('./service-sms');
-          await sendSMS(from, `Please reply "Yes" if available or "No" if not. Thanks!`);
+          await sendSMS(from, `Just reply Yes if you're available or No if you're not and we'll get you taken care of!`);
         }
         return;
       }
@@ -101,22 +101,43 @@ router.post('/inbound', async (req, res) => {
           await handleRescheduleReply(reschedulingJob, tech.id, 'no');
         } else {
           const { sendSMS } = require('./service-sms');
-          await sendSMS(from, `Please reply "Yes" if the new time works or "No" if not. Thanks!`);
+          await sendSMS(from, `Just reply Yes if the new time works or No if not and we'll get you taken care of!`);
         }
         return;
+      }
+
+      // Late cancellation — tech says No on a job they already accepted
+      if ((bodyLower === 'no' || bodyLower === 'n') && !pendingJob && !reschedulingJob) {
+        const { data: activeJob } = await supabase
+          .from('jobs').select('*')
+          .eq('confirmed_tech_id', tech.id)
+          .in('status', ['confirmed', 'awaiting_payment'])
+          .single();
+        if (activeJob) {
+          console.log(`[SMS Inbound] Late cancellation from tech ${tech.name} on job ${activeJob.id}`);
+          handleLateCancellation(activeJob, tech.id).catch(err =>
+            console.error('[SMS Inbound] Late cancellation error:', err)
+          );
+          return;
+        }
       }
 
       // Tech replied Done
       if (bodyLower === 'done' || bodyLower === 'complete' || bodyLower === 'finished') {
         console.log(`[SMS Inbound] Tech ${tech.name} replied Done — looking for confirmed job`);
         const { data: confirmedJobs } = await supabase
-          .from('jobs').select('id')
+          .from('jobs').select('id, tv_1_photo, photos_received_at')
           .eq('confirmed_tech_id', tech.id)
           .eq('status', 'confirmed')
           .order('paid_at', { ascending: false })
           .limit(1);
         const confirmedJob = confirmedJobs?.[0] || null;
         if (confirmedJob) {
+          if (!confirmedJob.tv_1_photo && !confirmedJob.photos_received_at) {
+            const { sendSMS } = require('./service-sms');
+            await sendSMS(from, `Don't forget to send your completion photos before we wrap up — we need those on file!`);
+            return;
+          }
           console.log(`[SMS Inbound] Found confirmed job ${confirmedJob.id} — marking complete`);
           await handleJobCompletion(confirmedJob.id);
           const { sendSMS } = require('./service-sms');
@@ -132,6 +153,21 @@ router.post('/inbound', async (req, res) => {
         const { sendSMS: sms } = require('./service-sms');
         await sms(from, 'No problem! Can you send a photo of the receipt so we can add it to your payout?');
         return;
+      }
+
+      // If tech has a confirmed job whose scheduled time has passed and no photos yet, remind them
+      const { data: overdueJob } = await supabase
+        .from('jobs').select('id, scheduled_time, tv_1_photo, photos_received_at')
+        .eq('confirmed_tech_id', tech.id)
+        .eq('status', 'confirmed')
+        .single();
+      if (overdueJob && !overdueJob.tv_1_photo && !overdueJob.photos_received_at) {
+        const scheduledTime = new Date(overdueJob.scheduled_time);
+        if (scheduledTime < new Date()) {
+          const { sendSMS: sms } = require('./service-sms');
+          await sms(from, `Don't forget to send your completion photos before we wrap up — we need those on file!`);
+          return;
+        }
       }
 
       // Tech sent something else — ignore silently
