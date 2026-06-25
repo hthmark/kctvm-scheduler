@@ -82,6 +82,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Fixed mount for TVs over 110"\n' +
   'If a customer needs an articulating mount and their TV is over 86": use $230 for the articulating mount add-on (not $120). Include in the SAME MESSAGE as the price quote: "Just a heads up — since your TV is over 86\", we\'d need to order that mount online which pushes your install out about 2 days." Do NOT send this as a separate message.\n' +
   'If a customer needs a fixed mount and their TV is over 110": use $60 for the fixed mount add-on. Include the same online order notice in the price quote message.\n' +
+  'DATE FORMAT FOR SPECIAL ORDER DELAYS: When proposing or confirming a specific appointment date in the context of a special order delay, always spell out the full date — day name, month, and day number. Format: "Saturday, June 28th at 5 PM" — never just "Saturday" or "Saturday at 5pm."\n' +
   'If yes: proceed normally, note the delay in the job.\n' +
   'If no: "No worries! You\'re welcome to source your own mount and we\'ll install it — that would bring the price down to just the labor."\n\n' +
   'CRITICAL LABOR RULE: $140 is ONLY for TVs strictly under 65". Any TV 65" or larger (65", 75", 85", 86", 96", 100", etc.) MUST use $160 for TV #1 labor. Never use $140 for a large TV. A 96" TV = $160 labor, NOT $140.\n\n' +
