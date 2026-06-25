@@ -669,8 +669,16 @@ async function handleConciergeMessage(from, body, mediaUrls) {
     // Hard-coded pre-check: enforce mount type question before Claude can skip it
     var reply;
     if (info.type === 'new' && needsMountTypeQuestion(messages)) {
-      reply = 'Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?';
-      console.log('[Concierge] Mount type pre-check triggered — bypassing Claude API');
+      console.log('[Concierge] Mount type pre-check triggered — prepending override to system prompt');
+      var mountOverride = 'OVERRIDE — MOUNT TYPE UNKNOWN: Your ONLY job in this response is to greet the customer by name if you have it, briefly acknowledge their request in one sentence, then ask: "Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?" Do not quote any price. Do not mention anything else. End your response after that question.\n\n';
+      var systemPrompt = mountOverride + buildSystemPrompt(info.type, info.job, nextSlot);
+      var response = await client.messages.create({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: messages
+      });
+      reply = response.content[0].text.trim();
     } else {
       var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
       var response = await client.messages.create({
