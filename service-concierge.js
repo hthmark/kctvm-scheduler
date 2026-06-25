@@ -607,6 +607,14 @@ async function checkAndCreateJob(phone, history) {
   }
 }
 
+function needsMountTypeQuestion(messages) {
+  const conversation = messages.map(function(m) { return typeof m.content === 'string' ? m.content : (m.content || []).map(function(c) { return c.text || ''; }).join(' '); }).join(' ');
+  const customerNeedsMount = /need.*(mount|mounting)|no.*own.*mount|don't.*have.*mount|need.*fixed|need.*articulating/i.test(conversation)
+    && !/i have.*mount|own.*mount|have my own/i.test(conversation);
+  const mountTypeConfirmed = /\bfixed\b|\barticulating\b|\bfull.motion\b/i.test(conversation);
+  return customerNeedsMount && !mountTypeConfirmed;
+}
+
 async function handleConciergeMessage(from, body, mediaUrls) {
   mediaUrls = mediaUrls || [];
   console.log('[Concierge] Message from ' + from + ': "' + body + '"');
@@ -657,16 +665,22 @@ async function handleConciergeMessage(from, body, mediaUrls) {
       ? { role: 'user', content: userContent[0].text }
       : { role: 'user', content: userContent };
     var messages = history.slice(-10).concat([userMessage]);
-    var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
 
-    var response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 300,
-      system: systemPrompt,
-      messages: messages
-    });
-
-    var reply = response.content[0].text.trim();
+    // Hard-coded pre-check: enforce mount type question before Claude can skip it
+    var reply;
+    if (info.type === 'new' && needsMountTypeQuestion(messages)) {
+      reply = 'Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?';
+      console.log('[Concierge] Mount type pre-check triggered — bypassing Claude API');
+    } else {
+      var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
+      var response = await client.messages.create({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: messages
+      });
+      reply = response.content[0].text.trim();
+    }
     console.log('[Concierge] Reply: "' + reply + '"');
 
     await addToHistory(from, 'user', body);
