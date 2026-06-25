@@ -2,6 +2,16 @@ const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+function formatJobTime(t) {
+  if (!t) return t;
+  const d = new Date(t);
+  if (isNaN(d.getTime()) || !/^\d{4}-\d{2}-\d{2}T/.test(t)) return t;
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Chicago', weekday: 'short', month: 'numeric',
+    day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  });
+}
+
 function calculatePayout(job) {
   let payout = 0, tvCount = 0;
   for (let i = 1; i <= 10; i++) {
@@ -56,7 +66,7 @@ async function generateTechMessage(job, tech) {
 Tech name: ${tech.name} (use first name only)
 Customer first name: ${job.customer_name.split(' ')[0]}
 City: ${job.city}
-Time: ${job.preferred_time}
+Time: ${formatJobTime(job.preferred_time)}
 Number of TVs: ${job.num_tvs}
 TV details:
 ${tvLines.join('\n')}

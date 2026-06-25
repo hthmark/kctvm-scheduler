@@ -313,7 +313,7 @@ async function handlePostBookingChange(from, body, job, reply) {
     (msgLower.includes('wire') || msgLower.includes('mount') || msgLower.includes('tv'));
   if (isRemoval) {
     if (shouldAlertOwner('removal:' + from)) {
-      await sendSMS(OWNER_PHONE, '📱 REMOVAL NEEDED\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + job.preferred_time + ' in ' + job.city + '\nRequest: ' + body);
+      await sendSMS(OWNER_PHONE, '📱 REMOVAL NEEDED\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + formatTimeForSMS(job.preferred_time) + ' in ' + job.city + '\nRequest: ' + body);
     }
     return;
   }
@@ -321,7 +321,7 @@ async function handlePostBookingChange(from, body, job, reply) {
   // Add-on — collect details via Claude then process
   // For now alert Gabe — the concierge handles the conversation, then alerts
   if (shouldAlertOwner('addon:' + from)) {
-    await sendSMS(OWNER_PHONE, '📱 ADD-ON NEEDED\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + job.preferred_time + ' in ' + job.city + '\nRequest: ' + body);
+    await sendSMS(OWNER_PHONE, '📱 ADD-ON NEEDED\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + formatTimeForSMS(job.preferred_time) + ' in ' + job.city + '\nRequest: ' + body);
   }
 }
 

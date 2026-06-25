@@ -118,7 +118,7 @@ async function processNewJob(job) {
     console.log(`[Orchestrator] Out-of-range TVs detected: ${tvNums} — alerting owner, holding job`);
     await updateJob(job.id, { status: 'awaiting_time_confirm' });
     await sendSMS(OWNER_PHONE,
-      `⚠️ MANUAL MOUNT NEEDED\n${job.customer_name} — ${job.city}\nTime: ${job.preferred_time}\nOut-of-range: ${tvNums}\nJob ID: ${job.id}`
+      `⚠️ MANUAL MOUNT NEEDED\n${job.customer_name} — ${job.city}\nTime: ${formatPreferredTime(job.preferred_time)}\nOut-of-range: ${tvNums}\nJob ID: ${job.id}`
     );
     return;
   }
@@ -239,10 +239,11 @@ async function handlePaymentComplete(job, address) {
   const basePayout = calculateBasePayout(job);
   await updateJob(job.id, { base_payout: basePayout });
 
-  const techMsg = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n\n${tvLines.join('\n')}${supplySection}\n\nBase payout: $${basePayout}\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
+  const displayJobTime = formatPreferredTime(job.preferred_time);
+  const techMsg = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${displayJobTime}\n\n${tvLines.join('\n')}${supplySection}\n\nBase payout: $${basePayout}\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
   console.log(`[Orchestrator] Tech msg length: ${techMsg.length} chars | body: ${techMsg}`);
   if (techMsg.length > 1580) {
-    const part1 = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${job.preferred_time}\n\n${tvLines.join('\n')}\n\nBase payout: $${basePayout}`;
+    const part1 = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${displayJobTime}\n\n${tvLines.join('\n')}\n\nBase payout: $${basePayout}`;
     const part2 = supplySection.trim() + `\n\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
     await sendSMS(tech.phone, part1);
     await sendSMS(tech.phone, part2);
