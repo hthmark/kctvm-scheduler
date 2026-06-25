@@ -427,7 +427,7 @@ async function scheduleFollowUp(phone, msg) {
   }
 }
 
-async function checkAndCreateJob(phone, history) {
+async function checkAndCreateJob(phone, history, specialOrderISO) {
   console.log('[checkAndCreateJob] Called for ' + phone + ' with ' + history.length + ' messages');
   if (history.length < 2) {
     console.log('[checkAndCreateJob] BLOCKED — history too short: ' + history.length);
@@ -594,6 +594,20 @@ async function checkAndCreateJob(phone, history) {
       return false;
     }
 
+    // Special order jobs: force the injected ISO timestamp and skip conflict/hours check
+    if (specialOrderISO && data.lift_confirmed === true) {
+      console.log('[checkAndCreateJob] Special order job — forcing preferred_time to ' + specialOrderISO);
+      data.preferred_time = specialOrderISO;
+      console.log('[checkAndCreateJob] SUBMITTING special order job for ' + phone + ' at ' + data.preferred_time);
+      var soPayload = Object.assign({}, data, { phone: phone });
+      delete soPayload.ready;
+      delete soPayload.time_confirmed;
+      delete soPayload.lift_confirmed;
+      await axios.post(process.env.BASE_URL + '/webhook/quote', soPayload, { headers: { 'Content-Type': 'application/json' } });
+      console.log('[checkAndCreateJob] Special order job created for ' + phone);
+      return true;
+    }
+
     // Single status check — outside_hours and conflict are completely separate paths
     var calMod = require('./service-calendar');
     var parsedDate = calMod.attemptDateParse(data.preferred_time);
@@ -669,40 +683,22 @@ function needsMountTypeQuestion(messages) {
 }
 
 function getSpecialOrderEarliestDate(requestedTime) {
-  var requestedHour = 17; // default 5 PM
-  var requestedMinute = 0;
-  var baseDate = null;
-
   if (requestedTime) {
     try {
       var calMod = require('./service-calendar');
       var parsed = calMod.attemptDateParse(requestedTime);
       if (parsed && !isNaN(parsed.getTime())) {
-        baseDate = parsed;
-        var hStr = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
-        var hm = hStr.match(/(\d+):(\d+)/);
-        if (hm) { requestedHour = parseInt(hm[1]); requestedMinute = parseInt(hm[2]); }
-      } else {
-        var timeMatch = requestedTime.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
-        if (timeMatch) {
-          requestedHour = parseInt(timeMatch[1]);
-          requestedMinute = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
-          var ampm = timeMatch[3].toLowerCase();
-          if (ampm === 'pm' && requestedHour !== 12) requestedHour += 12;
-          if (ampm === 'am' && requestedHour === 12) requestedHour = 0;
-        }
+        // Add exactly 72 hours to the ISO timestamp — hour/minute preserved automatically
+        return new Date(parsed.getTime() + 72 * 60 * 60 * 1000);
       }
     } catch(e) {}
   }
-
-  // Add exactly 72 hours to the base date (or now if no base)
-  var base = baseDate || new Date();
-  var result = new Date(base.getTime() + 72 * 60 * 60 * 1000);
-
-  // Preserve the requested hour:minute in Chicago time on that resulting date
+  // Fallback: 72h from now at 5 PM Chicago
+  var now = new Date();
+  var result = new Date(now.getTime() + 72 * 60 * 60 * 1000);
   var dateStr = result.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
   var parts = dateStr.split('/');
-  var chicagoDate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), requestedHour, requestedMinute, 0, 0);
+  var chicagoDate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), 17, 0, 0, 0);
   var offset = new Date(chicagoDate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
   return new Date(chicagoDate.getTime() + (chicagoDate - offset));
 }
@@ -778,11 +774,13 @@ async function handleConciergeMessage(from, body, mediaUrls) {
 
     // Compute special order date injection if applicable
     var specialOrderPrefix = '';
+    var specialOrderISO = null;
     if (needsSpecialOrderMount(messages)) {
       var soDate = getSpecialOrderEarliestDate(requestedTime);
       var soLabel = formatSpecialOrderDate(soDate);
-      specialOrderPrefix = 'SPECIAL ORDER DATE: The earliest available date for this special order mount job is "' + soLabel + '". Use ONLY this date when proposing the install date to the customer. Do not calculate or invent any other date.\n\n';
-      console.log('[Concierge] Special order date injected: ' + soLabel);
+      specialOrderISO = soDate.toISOString();
+      specialOrderPrefix = 'SPECIAL ORDER DATE: The earliest available date for this special order mount job is "' + soLabel + '" (ISO: ' + specialOrderISO + '). Use ONLY this date when proposing the install date to the customer. Do not calculate or invent any other date.\n\n';
+      console.log('[Concierge] Special order date injected: ' + soLabel + ' (' + specialOrderISO + ')');
     }
 
     // Hard-coded pre-check: enforce mount type question — skip Claude entirely
@@ -832,7 +830,7 @@ async function handleConciergeMessage(from, body, mediaUrls) {
       });
       if (hasSpecificTimeInHistory) {
         var updatedHistory = await getHistory(from);
-        await checkAndCreateJob(from, updatedHistory.concat([{role:'user',content:body},{role:'assistant',content:reply}]));
+        await checkAndCreateJob(from, updatedHistory.concat([{role:'user',content:body},{role:'assistant',content:reply}]), specialOrderISO);
       }
     }
 
