@@ -115,12 +115,10 @@ async function processNewJob(job) {
   const { outOfRangeTVs } = buildSupplyList(job);
   if (outOfRangeTVs.length > 0) {
     const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum} (${t.inches || t.size}", ${t.mount})`).join(', ');
-    console.log(`[Orchestrator] Out-of-range TVs detected: ${tvNums} — alerting owner, holding job`);
-    await updateJob(job.id, { status: 'awaiting_time_confirm' });
+    console.log(`[Orchestrator] Out-of-range TVs detected: ${tvNums} — alerting owner, continuing dispatch`);
     await sendSMS(OWNER_PHONE,
-      `⚠️ MANUAL MOUNT NEEDED\n${job.customer_name} — ${job.city}\nTime: ${formatPreferredTime(job.preferred_time)}\nOut-of-range: ${tvNums}\nJob ID: ${job.id}`
+      `⚠️ MOUNT ORDER NEEDED (FYI)\n${job.customer_name} — ${job.city}\nTime: ${formatPreferredTime(job.preferred_time)}\nOut-of-range: ${tvNums}\nJob ID: ${job.id}`
     );
-    return;
   }
 
   console.log(`[Orchestrator] Dispatching to tech for job ${job.id}`);
