@@ -616,6 +616,46 @@ function needsMountTypeQuestion(messages) {
   return customerNeedsMount && !mountTypeConfirmed;
 }
 
+function getSpecialOrderEarliestDate(requestedTime) {
+  var now = new Date();
+  var earliest = new Date(now);
+  earliest.setDate(earliest.getDate() + 2);
+  var requestedHour = 9;
+  if (requestedTime) {
+    try {
+      var parsed = new Date(requestedTime);
+      if (!isNaN(parsed.getTime())) {
+        var h = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false });
+        requestedHour = parseInt(h) || 9;
+      }
+    } catch(e) {}
+  }
+  // Build the date in Chicago time by constructing local date parts
+  var dateStr = earliest.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+  var parts = dateStr.split('/');
+  var chicagoDate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), requestedHour, 0, 0, 0);
+  var offset = new Date(chicagoDate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  return new Date(chicagoDate.getTime() + (chicagoDate - offset));
+}
+
+function formatSpecialOrderDate(date) {
+  var dayName = date.toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'long' });
+  var month = date.toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'long' });
+  var day = parseInt(date.toLocaleString('en-US', { timeZone: 'America/Chicago', day: 'numeric' }));
+  var suffix = day === 1 || day === 21 || day === 31 ? 'st' : day === 2 || day === 22 ? 'nd' : day === 3 || day === 23 ? 'rd' : 'th';
+  var time = date.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true });
+  return dayName + ', ' + month + ' ' + day + suffix + ' at ' + time;
+}
+
+function needsSpecialOrderMount(messages) {
+  var conversation = messages.map(function(m) { return typeof m.content === 'string' ? m.content : (m.content || []).map(function(c) { return c.text || ''; }).join(' '); }).join(' ');
+  // Articulating mount + TV over 86"
+  var articulatingOver86 = /articulating/i.test(conversation) && /\b(87|88|89|9\d|1\d{2}|200)["″]/i.test(conversation);
+  // Fixed mount + TV over 110"
+  var fixedOver110 = /fixed/i.test(conversation) && /\b(11[1-9]|1[2-9]\d|[2-9]\d{2})["″]/i.test(conversation);
+  return articulatingOver86 || fixedOver110;
+}
+
 async function handleConciergeMessage(from, body, mediaUrls) {
   mediaUrls = mediaUrls || [];
   console.log('[Concierge] Message from ' + from + ': "' + body + '"');
@@ -667,12 +707,21 @@ async function handleConciergeMessage(from, body, mediaUrls) {
       : { role: 'user', content: userContent };
     var messages = history.slice(-10).concat([userMessage]);
 
+    // Compute special order date injection if applicable
+    var specialOrderPrefix = '';
+    if (needsSpecialOrderMount(messages)) {
+      var soDate = getSpecialOrderEarliestDate(requestedTime);
+      var soLabel = formatSpecialOrderDate(soDate);
+      specialOrderPrefix = 'SPECIAL ORDER DATE: The earliest available date for this special order mount job is "' + soLabel + '". Use ONLY this date when proposing the install date to the customer. Do not calculate or invent any other date.\n\n';
+      console.log('[Concierge] Special order date injected: ' + soLabel);
+    }
+
     // Hard-coded pre-check: enforce mount type question before Claude can skip it
     var reply;
     if (info.type === 'new' && needsMountTypeQuestion(messages)) {
       console.log('[Concierge] Mount type pre-check triggered — prepending override to system prompt');
       var mountOverride = 'OVERRIDE — MOUNT TYPE UNKNOWN: Your ONLY job in this response is to greet the customer by name if you have it, briefly acknowledge their request in one sentence, then ask: "Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?" Do not quote any price. Do not mention anything else. End your response after that question.\n\n';
-      var systemPrompt = mountOverride + buildSystemPrompt(info.type, info.job, nextSlot);
+      var systemPrompt = mountOverride + specialOrderPrefix + buildSystemPrompt(info.type, info.job, nextSlot);
       var response = await client.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 300,
@@ -681,7 +730,7 @@ async function handleConciergeMessage(from, body, mediaUrls) {
       });
       reply = response.content[0].text.trim();
     } else {
-      var systemPrompt = buildSystemPrompt(info.type, info.job, nextSlot);
+      var systemPrompt = specialOrderPrefix + buildSystemPrompt(info.type, info.job, nextSlot);
       var response = await client.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 300,
