@@ -339,15 +339,70 @@ async function sendFollowUp(jobId) {
 
 // ─── RESCHEDULE FLOW ──────────────────────────────────────────────────────────
 
-async function handleRescheduleRequest(job, messageText) {
-  const firstName = job.customer_name.split(' ')[0];
+function extractTimeText(text) {
+  var match = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+  if (!match) return null;
+  var hour = parseInt(match[1]);
+  var minute = match[2] ? parseInt(match[2]) : 0;
+  var ampm = match[3].toUpperCase();
+  var minuteStr = minute > 0 ? ':' + String(minute).padStart(2, '0') : '';
+  return hour + minuteStr + ' ' + ampm;
+}
 
+function hasDay(text) {
+  return /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2})\b/i.test(text);
+}
+
+async function handleRescheduleRequest(job, messageText) {
   const newDate = attemptDateParse(messageText);
-  if (!newDate) {
+
+  // Got a parseable future date — proceed directly
+  if (newDate) {
+    return await _proceedWithRescheduleTime(job, newDate);
+  }
+
+  // Time-only (no day) — propose a day and ask them to confirm
+  const timeText = extractTimeText(messageText);
+  if (timeText && !hasDay(messageText)) {
+    // Try today first, fall back to tomorrow
+    const todayDate = attemptDateParse('today at ' + timeText);
+    const proposedDate = (todayDate && todayDate > new Date()) ? todayDate : attemptDateParse('tomorrow at ' + timeText);
+    const dayLabel = (todayDate && todayDate > new Date()) ? 'today' : 'tomorrow';
+
+    if (proposedDate) {
+      await updateJob(job.id, { status: 'rescheduling_day_confirm', rescheduling_new_time: proposedDate.toISOString() });
+      await sendSMS(job.customer_phone, `${timeText} ${dayLabel}? Let me check and get back to you!`);
+      console.log(`[Orchestrator] Day-confirm needed for job ${job.id} — proposed ${dayLabel} at ${timeText} (${proposedDate.toISOString()})`);
+      return;
+    }
+  }
+
+  // Can't parse anything useful
+  await sendSMS(job.customer_phone, `What day and time works better for you?`);
+}
+
+async function handleRescheduleConfirmDay(job, messageText) {
+  const msgLower = messageText.toLowerCase().trim();
+  const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|sounds good|perfect|great)$/i.test(msgLower);
+
+  let newDate;
+  if (isAffirmative || !hasDay(messageText)) {
+    // Customer confirmed the proposed day — use stored time
+    newDate = job.rescheduling_new_time ? new Date(job.rescheduling_new_time) : null;
+  } else {
+    // Customer gave a different day/time — parse it
+    newDate = attemptDateParse(messageText);
+  }
+
+  if (!newDate || isNaN(newDate.getTime())) {
     await sendSMS(job.customer_phone, `What day and time works better for you?`);
     return;
   }
 
+  await _proceedWithRescheduleTime(job, newDate);
+}
+
+async function _proceedWithRescheduleTime(job, newDate) {
   const available = await isTimeAvailable(newDate).catch(() => false);
   if (!available) {
     const alt = await findNextAvailableTime(null).catch(() => null);
@@ -363,7 +418,7 @@ async function handleRescheduleRequest(job, messageText) {
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
   const displayTime = formatPreferredTime(newDate.toISOString());
   await updateJob(job.id, { status: 'rescheduling_tech_confirm', rescheduling_new_time: newDate.toISOString() });
-  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer wants to move your job in ${job.city} to ${displayTime}. Does that still work for you?`);
+  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer wants to move your job in ${job.city} to ${displayTime}. Does that still work for you? Reply Yes or No.`);
   console.log(`[Orchestrator] Reschedule requested for job ${job.id} → ${newDate.toISOString()}, awaiting tech ${tech.name} reply`);
 }
 
@@ -408,4 +463,4 @@ async function handleRescheduleReply(job, techId, reply) {
   }
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleReply };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply };

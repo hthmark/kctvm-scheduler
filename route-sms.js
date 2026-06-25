@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleReply } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -136,6 +136,25 @@ router.post('/inbound', async (req, res) => {
 
       // Tech sent something else — ignore silently
       return;
+    }
+
+    // ── CHECK FOR RESCHEDULING DAY CONFIRM (customer replying to "11 AM tomorrow?") ─
+    if (body) {
+      const { data: dayConfirmJob } = await supabase
+        .from('jobs').select('*')
+        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .eq('status', 'rescheduling_day_confirm')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (dayConfirmJob) {
+        console.log(`[SMS Inbound] Day-confirm reply from ${from} for job ${dayConfirmJob.id}: "${body}"`);
+        handleRescheduleConfirmDay(dayConfirmJob, body).catch(err =>
+          console.error('[SMS Inbound] RescheduleConfirmDay error:', err)
+        );
+        return;
+      }
     }
 
     // ── CHECK FOR RESCHEDULE REQUEST ─────────────────────────────────────────
