@@ -76,9 +76,10 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'OUT OF STOCK (must order online, ~2-day delay):\n' +
   '- Articulating mount for TVs over 86"\n' +
   '- Fixed mount for TVs over 110"\n' +
-  'If a customer needs a mount we source and their TV is outside the available range: first confirm the mount type if not already known (ask "Would you want a fixed mount or an articulating one?"). Then say: "For a [size]" TV we\'d need to order that mount online which would push your install out about 2 days — does that work for you?" Use standard prices ($60 fixed, $120 articulating) — no surcharge for the special order.\n' +
+  'If a customer needs a mount we source and their TV is outside the available range: first confirm the mount type if not already known (ask "Would you want a fixed mount or an articulating one?"). Then in the SAME MESSAGE as the price quote, include: "Just a heads up — since your TV is [size]\", we\'d need to order that mount online which pushes the install out about 2 days." Do NOT send the heads-up as a separate message. Use standard prices ($60 fixed, $120 articulating) — no surcharge for the special order.\n' +
   'If yes: proceed normally, note the delay in the job.\n' +
   'If no: "No worries! You\'re welcome to source your own mount and we\'ll install it — that would bring the price down to just the labor."\n\n' +
+  'CRITICAL LABOR RULE: $140 is ONLY for TVs strictly under 65". Any TV 65" or larger (65", 75", 85", 86", 96", 100", etc.) MUST use $160 for TV #1 labor. Never use $140 for a large TV. A 96" TV = $160 labor, NOT $140.\n\n' +
   'TV SIZE FROM PHOTO: If a customer sends a photo of the TV sticker/label, identify the model number and determine the screen size. Tell them the size and confirm pricing. Use it to also recommend the correct mount type if needed.\n\n' +
   'GABE\'S STYLE: Casual, friendly, short sentences. "Amazing!", "Perfect!", "No worries!" Not corporate. Not a bot. Never mention Walmart, Home Depot, or any store name to customers.';
 
@@ -513,7 +514,7 @@ async function checkAndCreateJob(phone, history) {
               var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
               var alreadyProposed = lastAssistant && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastAssistant.content);
               if (!alreadyProposed) {
-                var altSmsTxt = 'Ah, looks like ' + formatTimeForSMS(data.preferred_time) + ' just got taken! I do have ' + altSlot.label + ' available though — does that work for you?';
+                var altSmsTxt = 'Hey ' + firstName + ', looks like ' + formatTimeForSMS(data.preferred_time) + ' is already booked — but I have ' + altSlot.label + ' available. Does that work for you?';
                 await addToHistory(phone, 'assistant', altSmsTxt + ' (time: ' + altSlot.raw + ')');
                 await sendSMS(phone, altSmsTxt);
                 console.log('[checkAndCreateJob] Conflict — proposed ' + altSlot.label + ' (' + altSlot.raw + ')');
@@ -569,7 +570,7 @@ async function checkAndCreateJob(phone, history) {
           var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
           var alreadyProposedSlot = lastMsg && /available|does that work|what time works/i.test(lastMsg.content);
           if (!alreadyProposedSlot) {
-            var conflictSmsTxt = 'Ah, looks like ' + formatTimeForSMS(data.preferred_time) + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
+            var conflictSmsTxt = 'Hey ' + firstName + ', looks like ' + formatTimeForSMS(data.preferred_time) + ' is already booked — but I have ' + nextSlot.label + ' available. Does that work for you?';
             await addToHistory(phone, 'assistant', conflictSmsTxt + ' (time: ' + nextSlot.raw + ')');
             await sendSMS(phone, conflictSmsTxt);
             console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label);
@@ -577,7 +578,7 @@ async function checkAndCreateJob(phone, history) {
             console.log('[checkAndCreateJob] Conflict already proposed — skipping duplicate');
           }
         } else {
-          var noSlotMsg = 'Hmm, that time just got taken and I\'m having trouble finding the next open slot. What other time works for you?';
+          var noSlotMsg = 'Hey ' + firstName + ', looks like ' + formatTimeForSMS(data.preferred_time) + ' is already booked and I\'m having trouble finding the next open slot. What other time works for you?';
           await addToHistory(phone, 'assistant', noSlotMsg);
           await sendSMS(phone, noSlotMsg);
         }
