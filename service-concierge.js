@@ -285,9 +285,12 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'MID-CONVERSATION CHANGES:\n' +
     'If a customer changes or adds a job detail (e.g. "actually I need a mount", "add wire concealment", "I want articulating instead"), treat it as a pricing update — NOT a response to any scheduling question. Acknowledge the change, recalculate the total using the pricing rules, and confirm the new price: e.g. "No worries! That\'ll add $60 so your total comes to $200 — does that work for you?" Only after they confirm the updated price should you continue with scheduling.\n' +
     'CRITICAL TIME RULES:\n' +
-    '1. Customer requested specific time and it IS available: say "Perfect, let me check on availability and get right back to you!" — NEVER say you\'re putting them down for a time or mention payment links. The orchestrator handles all confirmations.\n' +
+    '1. Customer requested specific time WITH a day (e.g. "tomorrow at 2pm", "Friday at 11am") and it IS available: say "Perfect, let me check on availability and get right back to you!" — NEVER say you\'re putting them down for a time or mention payment links. The orchestrator handles all confirmations.\n' +
     '2. Proposing earliest available time: say "I see we have an opening at [time] — does that work for you?"\n' +
-    '3. When customer confirms earliest time: say "Perfect! You\'ll hear back shortly once we confirm your tech." — same rule, no confirmations from the concierge.\n\n' +
+    '3. When customer confirms earliest time: say "Perfect! You\'ll hear back shortly once we confirm your tech." — same rule, no confirmations from the concierge.\n' +
+    'BARE TIME HANDLING (no day specified, e.g. "2pm", "11am", "3:30pm"):\n' +
+    'Current Kansas City time: ' + new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true }) + '\n' +
+    'If the customer gives ONLY a time with no day, ask exactly ONE short question: "[their time] today?" if that time is more than 4 hours from now, or "[their time] tomorrow?" if it is less than 4 hours away or already past. This must be your ENTIRE reply — nothing else. Do NOT say "let me check availability." Do NOT ask for day separately. Their yes/no IS the time confirmation.\n\n' +
     'CRITICAL SMS RULES:\n' +
     'Your response is sent DIRECTLY as an SMS. No asterisks, no bullet points, no brackets, no bold, no internal notes, no job summaries. Plain conversational text only. Never write anything between ** or [] or - lists.\n' +
     'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
@@ -367,11 +370,12 @@ async function checkAndCreateJob(phone, history) {
     '- Wire concealment (tv_N_wire="cable"): +$150 per TV\n' +
     '- If tv_N_mount="yes" customer has own mount — NO mount add-on cost\n' +
     'Example: TV1=55" own mount drywall no wire = $140. TV2=75" articulating drywall wire = $80+$120+$150 = $350. Total = $490.\n\n' +
-    'TIME CONFIRMATION RULES — set time_confirmed=true ONLY when ALL THREE of these are true:\n' +
+    'TIME CONFIRMATION RULES — set time_confirmed=true ONLY when ALL of these are true:\n' +
     '1. The customer has already agreed to the total price earlier in the conversation (not just been quoted it)\n' +
     '2. The customer has explicitly agreed to a specific time — not just mentioned one\n' +
-    '3. That agreement was a direct response to either: (a) KCTVM acknowledging the customer\'s stated time preference, OR (b) KCTVM proposing a specific alternative slot and the customer saying yes/ok/sure/works/etc.\n' +
-    'If the customer only mentioned a time without being asked to confirm it, or if the price has not yet been agreed to, set time_confirmed=false.\n\n' +
+    '3. That agreement was a direct response to either: (a) KCTVM acknowledging the customer\'s stated time preference, OR (b) KCTVM proposing a specific alternative slot and the customer saying yes/ok/sure/works/etc., OR (c) KCTVM sent a bare-time confirm like "2pm today?" or "11am tomorrow?" as an entire message and the customer replied yes/yeah/yep/ok/sure/works/sounds good/perfect.\n' +
+    'If customer only mentioned a time without being asked to confirm it, or if price has not yet been agreed to, set time_confirmed=false.\n' +
+    'BARE TIME CONFIRM: If KCTVM sent a message like "2pm today?" or "11am tomorrow?" and customer said yes — set time_confirmed=true AND set preferred_time to "today at [time]" or "tomorrow at [time]" accordingly (e.g. "today at 2pm" or "tomorrow at 11am").\n\n' +
     'preferred_time extraction: if an assistant message contains "(time: ISO_TIMESTAMP)" after proposing a slot, use that ISO string as preferred_time — not the human-readable label next to it.\n\n' +
     'If ALL details are present and price is confirmed, respond with JSON only:\n' +
     '{"ready":true,"time_confirmed":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
@@ -408,17 +412,38 @@ async function checkAndCreateJob(phone, history) {
           }
           var firstName = data.name ? data.name.split(' ')[0] : 'there';
           if (checkAvail) {
-            var confirmMsg = 'Great news — ' + formatTimeForSMS(data.preferred_time) + ' is available! Does that work for you?';
-            await addToHistory(phone, 'assistant', confirmMsg);
-            await sendSMS(phone, confirmMsg);
-            console.log('[checkAndCreateJob] Time available — asked customer to confirm: ' + data.preferred_time);
+            // Detect bare time (no day context): just "2pm", "11am", "3:30pm"
+            var isBareTime = /^\d{1,2}(:\d{2})?\s*(am|pm)$/i.test((data.preferred_time || '').trim());
+            var confirmMsg;
+            if (isBareTime) {
+              var nowDateStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit', year: 'numeric' });
+              var resolvedDateStr = parsedCheck.toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit', year: 'numeric' });
+              var dayWord = (resolvedDateStr === nowDateStr) ? 'today' : 'tomorrow';
+              var timeLabel = parsedCheck.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true });
+              confirmMsg = timeLabel + ' ' + dayWord + '?';
+              // Check dedup — Claude may have already sent this exact question
+              var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+              var alreadyAsked = lastMsg && /(today\?|tomorrow\?)/i.test(lastMsg.content);
+              if (!alreadyAsked) {
+                await addToHistory(phone, 'assistant', confirmMsg + ' (time: ' + parsedCheck.toISOString() + ')');
+                await sendSMS(phone, confirmMsg);
+                console.log('[checkAndCreateJob] Bare time confirm — sent "' + confirmMsg + '" for ' + parsedCheck.toISOString());
+              } else {
+                console.log('[checkAndCreateJob] Bare time already asked by Claude — skipping duplicate');
+              }
+            } else {
+              confirmMsg = 'Great news — ' + formatTimeForSMS(data.preferred_time) + ' is available! Does that work for you?';
+              await addToHistory(phone, 'assistant', confirmMsg + ' (time: ' + parsedCheck.toISOString() + ')');
+              await sendSMS(phone, confirmMsg);
+              console.log('[checkAndCreateJob] Time available — asked customer to confirm: ' + data.preferred_time);
+            }
           } else {
             var altSlot = null;
             try { altSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
             if (altSlot) {
               // Only propose if we haven't already proposed a time in the last assistant message
               var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-              var alreadyProposed = lastAssistant && /available|does that work|what time works/i.test(lastAssistant.content);
+              var alreadyProposed = lastAssistant && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastAssistant.content);
               if (!alreadyProposed) {
                 var altSmsTxt = 'Hey ' + firstName + ', looks like ' + formatTimeForSMS(data.preferred_time) + ' is already taken — but I have ' + altSlot.label + ' available. Does that work for you?';
                 await addToHistory(phone, 'assistant', altSmsTxt + ' (time: ' + altSlot.raw + ')');
