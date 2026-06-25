@@ -232,13 +232,6 @@ async function findNextAvailableTime(requestedTime) {
     candidate.setHours(candidate.getHours() + 1, 0, 0, 0);
   }
 
-  const getChicagoMinutes = (d) => {
-    const parts = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
-    const m = parts.match(/(\d+):(\d+)/);
-    if (!m) return 720;
-    return parseInt(m[1]) * 60 + parseInt(m[2]);
-  };
-
   let safetyCount = 0;
   while (safetyCount++ < 48) {
     const mins = getChicagoMinutes(candidate);
