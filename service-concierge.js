@@ -35,7 +35,8 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Each additional TV (TV #2, #3, etc.) 65" or larger: $80\n' +
   'ADD-ONS (on top of labor, per TV where applicable):\n' +
   '- Fixed mount (we source and bring it): +$60\n' +
-  '- Articulating/full-motion mount (we source and bring it): +$120\n' +
+  '- Articulating/full-motion mount for TVs 86" and under (we source and bring it): +$120\n' +
+  '- Articulating mount for TVs over 86" (special order, ~2-day delay): +$230\n' +
   '- Brick wall: +$150\n' +
   '- Wire/cable concealment: +$150 (requires existing outlet on same wall)\n' +
   'IMPORTANT: Labor is NEVER included with mount — always separate. Mount add-on only applies if customer does NOT have their own mount.\n' +
@@ -47,8 +48,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'EXAMPLE: TV1=50" fixed mount brick wire ($140+$60+$150+$150=$500), TV2=40" own mount drywall no wire ($70) → Total $570\n' +
   'When quoting, always show the breakdown per TV then the total. Ask "unless you have your own mount?" when a mount is needed.\n' +
   'We do NOT install new outlets. If no outlet on the wall, ask if they are flexible on TV placement.\n' +
-  'IMPORTANT: The lift question must never appear in the same message as the price quote. Quote price first, wait for price confirmation, then ask about the lift.\n' +
-  '- TVs 65" or larger: After mount type is confirmed and price is quoted, ask: "Just a heads up — since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n' +
+  '- TVs 65" or larger: Include the lift question in the SAME message as the price quote — do NOT send it as a separate message. After stating the price (and online order notice if applicable), add: "Just a heads up — since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n' +
   '  If no one can help with lift: say "Let me get Gabe on this for you" and route to manual.\n\n' +
   'TV SIZE IDENTIFICATION:\n' +
   '- If customer does not know their TV size, say: "There\'s generally a serial, model and make white sticker on the back of the TV. If you\'re able to send that over or take a photo of it I can help you determine the size and which mount would work best!"\n' +
@@ -78,7 +78,8 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'OUT OF STOCK (must order online, ~2-day delay):\n' +
   '- Articulating mount for TVs over 86"\n' +
   '- Fixed mount for TVs over 110"\n' +
-  'If a customer needs a mount we source and their TV is outside the available range: once mount type is confirmed, include the online order notice in the SAME MESSAGE as the price quote: "Just a heads up — since your TV is [size]\", we\'d need to order that mount online which pushes the install out about 2 days." Do NOT send the heads-up as a separate message. Use standard prices ($60 fixed, $120 articulating) — no surcharge for the special order.\n' +
+  'If a customer needs an articulating mount and their TV is over 86": use $230 for the articulating mount add-on (not $120). Include in the SAME MESSAGE as the price quote: "Just a heads up — since your TV is over 86\", we\'d need to order that mount online which pushes your install out about 2 days." Do NOT send this as a separate message.\n' +
+  'If a customer needs a fixed mount and their TV is over 110": use $60 for the fixed mount add-on. Include the same online order notice in the price quote message.\n' +
   'If yes: proceed normally, note the delay in the job.\n' +
   'If no: "No worries! You\'re welcome to source your own mount and we\'ll install it — that would bring the price down to just the labor."\n\n' +
   'CRITICAL LABOR RULE: $140 is ONLY for TVs strictly under 65". Any TV 65" or larger (65", 75", 85", 86", 96", 100", etc.) MUST use $160 for TV #1 labor. Never use $140 for a large TV. A 96" TV = $160 labor, NOT $140.\n\n' +
