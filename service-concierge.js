@@ -135,6 +135,20 @@ async function identifyCustomer(phone) {
   return { type: 'new', job: null };
 }
 
+// Returns { status: 'outside_hours' | 'conflict' | 'available' }
+// MUST be called before any conflict detection — outside_hours and conflict are separate paths
+async function checkTimeStatus(parsedDate) {
+  var calMod = require('./service-calendar');
+  var p = parsedDate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+  var m = p.match(/(\d+):(\d+)/);
+  if (!m) return { status: 'conflict' };
+  var mins = parseInt(m[1]) * 60 + parseInt(m[2]);
+  if (mins > 19 * 60 || mins < 7 * 60) return { status: 'outside_hours' };
+  var available = false;
+  try { available = await calMod.isTimeAvailable(parsedDate); } catch(e) {}
+  return { status: available ? 'available' : 'conflict' };
+}
+
 async function findFirstSlotTomorrow() {
   var calMod = require('./service-calendar');
   var kcTomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('en-US', {
@@ -317,7 +331,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     if (nextSlot.exact) {
       slotInstruction = 'TIME AVAILABLE: The customer\'s requested time ' + nextSlot.label + ' IS available (ISO: ' + nextSlot.raw + '). Ask them to confirm it — for bare times (no day) use the BARE TIME HANDLING rule above. For times with a day, say: "Does ' + nextSlot.label + ' work for you?" Use the ISO time as preferred_time in job submission once confirmed.\n';
     } else if (nextSlot.afterHours) {
-      slotInstruction = 'AFTER-HOURS REQUEST: The customer requested a time outside our 7 AM–7 PM business hours. Do NOT say the time is "taken," "unavailable," or imply a scheduling conflict. Say EXACTLY (using their first name if you know it): "Hey [name], unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + nextSlot.label + '. Does that work for you?" Use ISO ' + nextSlot.raw + ' as preferred_time once they confirm.\n';
+      slotInstruction = 'AFTER-HOURS REQUEST — OVERRIDE ALL OTHER TIME RULES INCLUDING BARE TIME HANDLING: The customer requested a time outside our 7 AM–7 PM business hours. Do NOT ask "does [time] today?" Do NOT say the time is "taken," "unavailable," or imply a scheduling conflict. Send EXACTLY this message (substitute their first name if known, otherwise omit it): "Hey [name], unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + nextSlot.label + '. Does that work for you?" This is your COMPLETE reply. Use ISO ' + nextSlot.raw + ' as preferred_time once they confirm.\n';
     } else {
       slotInstruction = 'EARLIEST AVAILABLE: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
@@ -337,9 +351,10 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     '1. Customer requested specific time WITH a day (e.g. "tomorrow at 2pm", "Friday at 11am") and it IS available: say "Perfect, let me check on availability and get right back to you!" — NEVER say you\'re putting them down for a time or mention payment links. The orchestrator handles all confirmations.\n' +
     '2. Proposing earliest available time: say "I see we have an opening at [time] — does that work for you?"\n' +
     '3. When customer confirms earliest time: say "Perfect! You\'ll hear back shortly once we confirm your tech." — same rule, no confirmations from the concierge.\n' +
-    'BARE TIME HANDLING (no day specified, e.g. "2pm", "11am", "3:30pm"):\n' +
+    (nextSlot && nextSlot.afterHours ? '' :
+    'BARE TIME HANDLING (no day specified, e.g. "2pm", "11am", "3:30pm") — only applies when the requested time is within 7 AM–7 PM:\n' +
     'Current Kansas City time: ' + new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true }) + '\n' +
-    'If the customer gives ONLY a time with no day, ask exactly ONE short question: "[their time] today?" if that time is more than 4 hours from now, or "[their time] tomorrow?" if it is less than 4 hours away or already past. This must be your ENTIRE reply — nothing else. Do NOT say "let me check availability." Do NOT ask for day separately. Their yes/no IS the time confirmation.\n\n' +
+    'If the customer gives ONLY a time with no day AND it falls within business hours, ask exactly ONE short question: "[their time] today?" if that time is more than 4 hours from now, or "[their time] tomorrow?" if it is less than 4 hours away or already past. This must be your ENTIRE reply — nothing else. Do NOT say "let me check availability." Do NOT ask for day separately. Their yes/no IS the time confirmation.\n\n') +
     'CRITICAL SMS RULES:\n' +
     'Your response is sent DIRECTLY as an SMS. No asterisks, no bullet points, no brackets, no bold, no internal notes, no job summaries. Plain conversational text only. Never write anything between ** or [] or - lists.\n' +
     'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
@@ -456,13 +471,12 @@ async function checkAndCreateJob(phone, history) {
         var parsedCheck = calModCheck.attemptDateParse(data.preferred_time);
         if (parsedCheck && parsedCheck > new Date()) {
           var firstName = data.name ? data.name.split(' ')[0] : 'there';
+          var timeStatus = await checkTimeStatus(parsedCheck);
 
-          // Business-hours check FIRST — never let after-hours times reach the calendar check
-          var checkParts = parsedCheck.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
-          var checkMinsM = checkParts.match(/(\d+):(\d+)/);
-          var checkMins = checkMinsM ? parseInt(checkMinsM[1]) * 60 + parseInt(checkMinsM[2]) : 720;
-          if (checkMins > 19 * 60 || checkMins < 7 * 60) {
-            console.log('[checkAndCreateJob] Pre-confirm after-hours time (' + checkParts + ') — redirecting to tomorrow morning');
+          if (timeStatus.status === 'outside_hours') {
+            // ── OUTSIDE HOURS ─────────────────────────────────────────────────
+            // Completely separate from conflict — never use conflict language here
+            console.log('[checkAndCreateJob] Pre-confirm outside_hours — redirecting to tomorrow morning');
             var tSlotPC = await findFirstSlotTomorrow().catch(() => null);
             var lastAsstPC = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
             var alreadyProposedPC = lastAsstPC && /7 AM to 7 PM|late for us/i.test(lastAsstPC.content);
@@ -473,41 +487,35 @@ async function checkAndCreateJob(phone, history) {
               await addToHistory(phone, 'assistant', tSlotPC ? ahMsgPC + ' (time: ' + tSlotPC.raw + ')' : ahMsgPC);
               await sendSMS(phone, ahMsgPC);
             }
-            return false;
-          }
 
-          var checkAvail = false;
-          try { checkAvail = await calModCheck.isTimeAvailable(parsedCheck); } catch(e) {
-            console.error('[checkAndCreateJob] Pre-confirm calendar check error:', e.message);
-          }
-          if (checkAvail) {
-            // Concierge owns the customer-facing confirmation message — it already asked via the system
-            // prompt slotInstruction. We only record the ISO here so the extractor can use it on the
-            // next turn when the customer says yes.
+          } else if (timeStatus.status === 'available') {
+            // ── CALENDAR AVAILABLE ────────────────────────────────────────────
+            // Concierge owns the customer-facing confirmation message. Record ISO
+            // so the extractor can pick it up when the customer confirms.
             var lastAssistantMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
             var isoAlreadyAnnotated = lastAssistantMsg && lastAssistantMsg.content.includes('(time: ' + parsedCheck.toISOString() + ')');
             if (!isoAlreadyAnnotated && lastAssistantMsg) {
-              // Append the ISO annotation to the last assistant message in history so the extractor
-              // can pick up the exact timestamp when the customer confirms.
               await supabase.from('sms_conversations')
                 .update({ content: lastAssistantMsg.content + ' (time: ' + parsedCheck.toISOString() + ')' })
                 .eq('phone', phone).eq('role', 'assistant').eq('content', lastAssistantMsg.content);
-              console.log('[checkAndCreateJob] Time available — ISO annotated on last assistant message for ' + data.preferred_time);
+              console.log('[checkAndCreateJob] Time available — ISO annotated for ' + data.preferred_time);
             } else {
               console.log('[checkAndCreateJob] Time available — ISO already annotated or no prior assistant message');
             }
+
           } else {
+            // ── CALENDAR CONFLICT ─────────────────────────────────────────────
+            // Only fires for in-hours times with a genuine booking conflict
             var altSlot = null;
             try { altSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
             if (altSlot) {
-              // Only propose if we haven't already proposed a time in the last assistant message
               var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
               var alreadyProposed = lastAssistant && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastAssistant.content);
               if (!alreadyProposed) {
                 var altSmsTxt = 'Ah, looks like ' + formatTimeForSMS(data.preferred_time) + ' just got taken! I do have ' + altSlot.label + ' available though — does that work for you?';
                 await addToHistory(phone, 'assistant', altSmsTxt + ' (time: ' + altSlot.raw + ')');
                 await sendSMS(phone, altSmsTxt);
-                console.log('[checkAndCreateJob] Conflict on unconfirmed time — proposed ' + altSlot.label + ' (' + altSlot.raw + ')');
+                console.log('[checkAndCreateJob] Conflict — proposed ' + altSlot.label + ' (' + altSlot.raw + ')');
               } else {
                 console.log('[checkAndCreateJob] Conflict already proposed in last message — skipping duplicate');
               }
@@ -526,40 +534,33 @@ async function checkAndCreateJob(phone, history) {
       return false;
     }
 
-    // Business-hours guard — last bookable start is 7:00 PM KC (jobs finish 8:30 PM)
+    // Single status check — outside_hours and conflict are completely separate paths
     var calMod = require('./service-calendar');
     var parsedDate = calMod.attemptDateParse(data.preferred_time);
-    if (parsedDate) {
-      var chicagoTimeParts = parsedDate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
-      var chicagoMatch = chicagoTimeParts.match(/(\d+):(\d+)/);
-      if (chicagoMatch) {
-        var chicagoMins = parseInt(chicagoMatch[1]) * 60 + parseInt(chicagoMatch[2]);
-        if (chicagoMins > 19 * 60 || chicagoMins < 7 * 60) {
-          console.log('[checkAndCreateJob] After-hours time (' + chicagoTimeParts + ') — redirecting to tomorrow morning');
-          var firstName = data.name ? data.name.split(' ')[0] : 'there';
-          var morningSlot = await findFirstSlotTomorrow().catch(() => null);
-          var lastMsgAH = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-          var alreadyProposedAH = lastMsgAH && /7 AM to 7 PM|late for us/i.test(lastMsgAH.content);
-          if (!alreadyProposedAH) {
-            var afterHoursMsg = morningSlot
-              ? 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + morningSlot.label + '. Does that work for you?'
-              : 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. What morning time works for you?';
-            await addToHistory(phone, 'assistant', morningSlot ? afterHoursMsg + ' (time: ' + morningSlot.raw + ')' : afterHoursMsg);
-            await sendSMS(phone, afterHoursMsg);
-          }
-          return false;
-        }
-      }
-    }
-
-    // Calendar check before creating the job
-    // (parsedDate already set above)
     if (parsedDate && parsedDate > new Date()) {
-      var slotAvailable = false;
-      try { slotAvailable = await calMod.isTimeAvailable(parsedDate); } catch(e) {
-        console.error('[checkAndCreateJob] Calendar check error:', e.message);
+      var firstName = data.name ? data.name.split(' ')[0] : 'there';
+      var dateStatus = await checkTimeStatus(parsedDate);
+
+      if (dateStatus.status === 'outside_hours') {
+        // ── OUTSIDE HOURS ───────────────────────────────────────────────────
+        // Never reaches calendar check; never uses conflict language
+        console.log('[checkAndCreateJob] outside_hours — redirecting to tomorrow morning');
+        var morningSlot = await findFirstSlotTomorrow().catch(() => null);
+        var lastMsgAH = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+        var alreadyProposedAH = lastMsgAH && /7 AM to 7 PM|late for us/i.test(lastMsgAH.content);
+        if (!alreadyProposedAH) {
+          var afterHoursMsg = morningSlot
+            ? 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + morningSlot.label + '. Does that work for you?'
+            : 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. What morning time works for you?';
+          await addToHistory(phone, 'assistant', morningSlot ? afterHoursMsg + ' (time: ' + morningSlot.raw + ')' : afterHoursMsg);
+          await sendSMS(phone, afterHoursMsg);
+        }
+        return false;
       }
-      if (!slotAvailable) {
+
+      if (dateStatus.status === 'conflict') {
+        // ── CALENDAR CONFLICT ────────────────────────────────────────────────
+        // Only fires for in-hours times; never for outside_hours
         console.log('[checkAndCreateJob] Conflict at "' + data.preferred_time + '" — finding next slot');
         var nextSlot = null;
         try { nextSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
@@ -570,9 +571,9 @@ async function checkAndCreateJob(phone, history) {
             var conflictSmsTxt = 'Ah, looks like ' + formatTimeForSMS(data.preferred_time) + ' just got taken! I do have ' + nextSlot.label + ' available though — does that work for you?';
             await addToHistory(phone, 'assistant', conflictSmsTxt + ' (time: ' + nextSlot.raw + ')');
             await sendSMS(phone, conflictSmsTxt);
-            console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label + ' (' + nextSlot.raw + ') to customer');
+            console.log('[checkAndCreateJob] Conflict — proposed ' + nextSlot.label);
           } else {
-            console.log('[checkAndCreateJob] Conflict already proposed in last message — skipping duplicate');
+            console.log('[checkAndCreateJob] Conflict already proposed — skipping duplicate');
           }
         } else {
           var noSlotMsg = 'Hmm, that time just got taken and I\'m having trouble finding the next open slot. What other time works for you?';
@@ -581,6 +582,7 @@ async function checkAndCreateJob(phone, history) {
         }
         return false;
       }
+      // dateStatus.status === 'available' → fall through to job submission
     }
 
     console.log('[checkAndCreateJob] SUBMITTING job for ' + phone + ' at ' + data.preferred_time);
