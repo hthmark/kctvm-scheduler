@@ -142,18 +142,34 @@ async function findNextAvailableTime(requestedTime) {
   // Note: canonical implementation now lives in service-calendar.js — keeping this
   // copy here so the concierge can call it directly without re-requiring below.
 
+  var getChicagoMinutesOf = function(d) {
+    var p = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+    var mx = p.match(/(\d+):(\d+)/);
+    if (!mx) return 720;
+    return parseInt(mx[1]) * 60 + parseInt(mx[2]);
+  };
+
+  var isAfterHoursRequest = false;
+
   if (requestedTime) {
     var parsed = attemptDateParse(requestedTime);
     console.log('[Concierge] Requested time: "' + requestedTime + '" parsed to: ' + (parsed ? parsed.toISOString() : 'null'));
     if (parsed && parsed > new Date()) {
-      var avail = false;
-      try { avail = await isTimeAvailable(parsed); } catch(e) {}
-      if (avail) {
-        var timeStr = parsed.toLocaleString('en-US', {
-          timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
-          hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
-        });
-        return { time: parsed, label: timeStr, raw: parsed.toISOString(), exact: true };
+      // Business-hours check first — outside 7am–7pm KC means after-hours, not a conflict
+      var reqMins = getChicagoMinutesOf(parsed);
+      if (reqMins >= 7 * 60 && reqMins <= 19 * 60) {
+        var avail = false;
+        try { avail = await isTimeAvailable(parsed); } catch(e) {}
+        if (avail) {
+          var timeStr = parsed.toLocaleString('en-US', {
+            timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+            hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
+          });
+          return { time: parsed, label: timeStr, raw: parsed.toISOString(), exact: true };
+        }
+      } else {
+        console.log('[Concierge] Requested time ' + parsed.toISOString() + ' is outside business hours (' + reqMins + ' mins) — finding next morning slot');
+        isAfterHoursRequest = true;
       }
     }
   }
@@ -195,7 +211,7 @@ async function findNextAvailableTime(requestedTime) {
           timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
           hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
         });
-        return { time: candidate, label: label, raw: candidate.toISOString(), exact: false };
+        return { time: candidate, label: label, raw: candidate.toISOString(), exact: false, afterHours: isAfterHoursRequest };
       }
     } catch (err) {
       console.error('[Concierge] Calendar check error:', err.message);
@@ -263,6 +279,8 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   if (nextSlot) {
     if (nextSlot.exact) {
       slotInstruction = 'TIME AVAILABLE: The customer\'s requested time ' + nextSlot.label + ' IS available (ISO: ' + nextSlot.raw + '). Ask them to confirm it — for bare times (no day) use the BARE TIME HANDLING rule above. For times with a day, say: "Does ' + nextSlot.label + ' work for you?" Use the ISO time as preferred_time in job submission once confirmed.\n';
+    } else if (nextSlot.afterHours) {
+      slotInstruction = 'AFTER-HOURS REQUEST: The customer requested a time outside our 7 AM–7 PM business hours. Do NOT say it is "taken" or "unavailable." Say EXACTLY: "Unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The next available time I have is ' + nextSlot.label + '." Then stop — let them respond. Use ISO ' + nextSlot.raw + ' as preferred_time once they confirm.\n';
     } else {
       slotInstruction = 'EARLIEST AVAILABLE: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
@@ -467,8 +485,8 @@ async function checkAndCreateJob(phone, history) {
           var alreadyProposedAH = lastMsgAH && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastMsgAH.content);
           if (!alreadyProposedAH) {
             var afterHoursMsg = morningSlot
-              ? 'Ah, we stop taking bookings after 7pm — but I have ' + morningSlot.label + ' available. Does that work for you?'
-              : "We stop taking bookings after 7pm. What morning or afternoon time works for you?";
+              ? 'Unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The next available time I have is ' + morningSlot.label + '.'
+              : "Unfortunately that's a little late for us — we run 7 AM to 7 PM. What morning or afternoon time works for you?";
             if (morningSlot) {
               await addToHistory(phone, 'assistant', afterHoursMsg + ' (time: ' + morningSlot.raw + ')');
             } else {

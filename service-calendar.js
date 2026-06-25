@@ -193,18 +193,31 @@ async function deleteJobEvent(eventId) {
 }
 
 async function findNextAvailableTime(requestedTime) {
+  const getChicagoMinutes = (d) => {
+    const parts = d.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+    const m = parts.match(/(\d+):(\d+)/);
+    if (!m) return 720;
+    return parseInt(m[1]) * 60 + parseInt(m[2]);
+  };
+
   if (requestedTime) {
     const parsed = attemptDateParse(requestedTime);
     console.log('[Calendar] Requested time: "' + requestedTime + '" parsed to: ' + (parsed ? parsed.toISOString() : 'null'));
     if (parsed && parsed > new Date()) {
-      let avail = false;
-      try { avail = await isTimeAvailable(parsed); } catch(e) {}
-      if (avail) {
-        const timeStr = parsed.toLocaleString('en-US', {
-          timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
-          hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
-        });
-        return { time: parsed, label: timeStr, raw: parsed.toISOString(), exact: true };
+      // Business-hours check first — outside 7am–7pm KC means after-hours, not a conflict
+      const reqMins = getChicagoMinutes(parsed);
+      if (reqMins >= 7 * 60 && reqMins <= 19 * 60) {
+        let avail = false;
+        try { avail = await isTimeAvailable(parsed); } catch(e) {}
+        if (avail) {
+          const timeStr = parsed.toLocaleString('en-US', {
+            timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit',
+            hour12: true, weekday: 'short', month: 'numeric', day: 'numeric'
+          });
+          return { time: parsed, label: timeStr, raw: parsed.toISOString(), exact: true };
+        }
+      } else {
+        console.log('[Calendar] Requested time ' + parsed.toISOString() + ' is outside business hours (' + reqMins + ' mins) — finding next morning slot');
       }
     }
   }
