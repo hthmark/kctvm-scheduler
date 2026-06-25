@@ -70,8 +70,10 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'Before confirming wire concealment for any TV, you MUST ask: "Just to confirm — is there an outlet below or near where the TV will be mounted?" Do not proceed to price confirmation until this is answered.\n' +
   'If customer says NO outlet: "Unfortunately we need an existing outlet on the wall below the TV to conceal the wires, so we wouldn\'t be able to do wire concealment in that case — but we can still mount the TV!"\n' +
   'If customer says YES: proceed normally.\n\n' +
-  'MOUNT TYPE — MUST ASK BEFORE PRICING:\n' +
-  'If the customer says they need a mount (or does not have their own mount) and has NOT already said "fixed" or "articulating", you MUST ask: "Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?" before calculating or quoting any price. Do NOT skip this question for any reason — not because the TV is large, not because the mount needs to be ordered online, not for any other condition. Mount type must be confirmed by the customer before any price is quoted.\n\n' +
+  'MOUNT TYPE — HARD STOP BEFORE PRICING:\n' +
+  'If the customer needs a mount (they do NOT have their own) and has NOT said "fixed" or "articulating" in this conversation, STOP. Do NOT calculate or mention any price. Send ONLY this question and nothing else: "Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?"\n' +
+  'Do not combine this with a price. Do not say the price will depend on the answer. Just ask the question alone and wait.\n' +
+  'This is a HARD STOP — no price may appear in any message until mount type is confirmed.\n\n' +
   'MOUNT INVENTORY — AVAILABLE IN STOCK:\n' +
   '- Fixed mount: covers 32"–110" (available)\n' +
   '- Articulating mount: covers 32"–86" (available)\n' +
