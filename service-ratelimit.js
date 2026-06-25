@@ -9,7 +9,7 @@ const sentAlerts = new Set();   // tracks "issue keys" we already alerted owner 
 const smsCounters = new Map();  // phone -> { minute: count, hour: count, lastReset: ts }
 
 const LIMITS = {
-  PER_NUMBER_PER_HOUR: 15,    // max outbound texts to any single customer number per hour
+  PER_NUMBER_PER_HOUR: 40,    // max outbound texts to any single customer number per hour
   PER_NUMBER_PER_MINUTE: 15,  // max outbound texts to any single number per minute
 };
 
