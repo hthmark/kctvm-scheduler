@@ -40,6 +40,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   '- Brick wall: +$150\n' +
   '- Wire/cable concealment: +$150 (requires existing outlet on same wall)\n' +
   'IMPORTANT: Labor is NEVER included with mount — always separate. Mount add-on only applies if customer does NOT have their own mount.\n' +
+  'NEVER add line items that do not exist in the pricing table above. Wire concealment removal fees, setup fees, disposal fees, travel fees, or any charge not listed in KANSAS CITY TV MOUNTING PRICING must never appear in a quote.\n' +
   'HOW TO CALCULATE — always build up TV by TV:\n' +
   '  TV1: [labor for first TV] + [add-ons]\n' +
   '  TV2: [labor for additional TV at $70 or $80] + [add-ons]\n' +
@@ -364,6 +365,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'If the customer gives ONLY a time with no day AND it falls within business hours, ask exactly ONE short question: "[their time] today?" if that time is more than 4 hours from now, or "[their time] tomorrow?" if it is less than 4 hours away or already past. This must be your ENTIRE reply — nothing else. Do NOT say "let me check availability." Do NOT ask for day separately. Their yes/no IS the time confirmation.\n\n') +
     'CRITICAL SMS RULES:\n' +
     'Your response is sent DIRECTLY as an SMS. No asterisks, no bullet points, no brackets, no bold, no internal notes, no job summaries. Plain conversational text only. Never write anything between ** or [] or - lists.\n' +
+    'CRITICAL: Never ask more than one question in a single SMS. If you need to ask about mount type AND lift AND price — ask them in separate turns. Price quote first. Then lift question after price is confirmed. Never combine them.\n' +
     'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
 }
 
@@ -716,19 +718,14 @@ async function handleConciergeMessage(from, body, mediaUrls) {
       console.log('[Concierge] Special order date injected: ' + soLabel);
     }
 
-    // Hard-coded pre-check: enforce mount type question before Claude can skip it
+    // Hard-coded pre-check: enforce mount type question — skip Claude entirely
     var reply;
     if (info.type === 'new' && needsMountTypeQuestion(messages)) {
-      console.log('[Concierge] Mount type pre-check triggered — prepending override to system prompt');
-      var mountOverride = 'OVERRIDE — MOUNT TYPE UNKNOWN: Your ONLY job in this response is to greet the customer by name if you have it, briefly acknowledge their request in one sentence, then ask: "Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?" Do not quote any price. Do not mention anything else. End your response after that question.\n\n';
-      var systemPrompt = mountOverride + specialOrderPrefix + buildSystemPrompt(info.type, info.job, nextSlot);
-      var response = await client.messages.create({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 300,
-        system: systemPrompt,
-        messages: messages
-      });
-      reply = response.content[0].text.trim();
+      console.log('[Concierge] Mount type pre-check triggered — sending hardcoded reply, skipping Claude');
+      var allConvo = messages.map(function(m) { return typeof m.content === 'string' ? m.content : (m.content || []).map(function(c) { return c.text || ''; }).join(' '); }).join(' ');
+      var nameMatch = allConvo.match(/(?:name is|i'm|my name's|this is)\s+(\w+)/i);
+      var greeting = nameMatch ? 'Hey ' + nameMatch[1] + '!' : 'Hey there!';
+      reply = greeting + " Thanks for reaching out — I'm Gabe from Kansas City TV Mounting. Would you want a fixed mount that sits flat against the wall, or an articulating one that lets you tilt and swivel?";
     } else {
       var systemPrompt = specialOrderPrefix + buildSystemPrompt(info.type, info.job, nextSlot);
       var response = await client.messages.create({
