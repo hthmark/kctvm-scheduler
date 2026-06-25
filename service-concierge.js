@@ -268,7 +268,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
   var slotInstruction = '';
   if (nextSlot) {
     if (nextSlot.exact) {
-      slotInstruction = 'TIME CONFIRMED: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "Perfect! You\'ll hear back shortly once we confirm your tech."\n';
+      slotInstruction = 'TIME AVAILABLE: The customer\'s requested time ' + nextSlot.label + ' IS available (ISO: ' + nextSlot.raw + '). Ask them to confirm it — for bare times (no day) use the BARE TIME HANDLING rule above. For times with a day, say: "Does ' + nextSlot.label + ' work for you?" Use the ISO time as preferred_time in job submission once confirmed.\n';
     } else {
       slotInstruction = 'EARLIEST AVAILABLE: slot time is ' + nextSlot.label + ' (ISO: ' + nextSlot.raw + '). Use the ISO time as preferred_time in job submission. Say: "I see we have an opening at ' + nextSlot.label + ' — does that work for you?"\n';
     }
@@ -412,30 +412,20 @@ async function checkAndCreateJob(phone, history) {
           }
           var firstName = data.name ? data.name.split(' ')[0] : 'there';
           if (checkAvail) {
-            // Detect bare time (no day context): just "2pm", "11am", "3:30pm"
-            var isBareTime = /^\d{1,2}(:\d{2})?\s*(am|pm)$/i.test((data.preferred_time || '').trim());
-            var confirmMsg;
-            if (isBareTime) {
-              var nowDateStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit', year: 'numeric' });
-              var resolvedDateStr = parsedCheck.toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit', year: 'numeric' });
-              var dayWord = (resolvedDateStr === nowDateStr) ? 'today' : 'tomorrow';
-              var timeLabel = parsedCheck.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true });
-              confirmMsg = timeLabel + ' ' + dayWord + '?';
-              // Check dedup — Claude may have already sent this exact question
-              var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-              var alreadyAsked = lastMsg && /(today\?|tomorrow\?)/i.test(lastMsg.content);
-              if (!alreadyAsked) {
-                await addToHistory(phone, 'assistant', confirmMsg + ' (time: ' + parsedCheck.toISOString() + ')');
-                await sendSMS(phone, confirmMsg);
-                console.log('[checkAndCreateJob] Bare time confirm — sent "' + confirmMsg + '" for ' + parsedCheck.toISOString());
-              } else {
-                console.log('[checkAndCreateJob] Bare time already asked by Claude — skipping duplicate');
-              }
+            // Concierge owns the customer-facing confirmation message — it already asked via the system
+            // prompt slotInstruction. We only record the ISO here so the extractor can use it on the
+            // next turn when the customer says yes.
+            var lastAssistantMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+            var isoAlreadyAnnotated = lastAssistantMsg && lastAssistantMsg.content.includes('(time: ' + parsedCheck.toISOString() + ')');
+            if (!isoAlreadyAnnotated && lastAssistantMsg) {
+              // Append the ISO annotation to the last assistant message in history so the extractor
+              // can pick up the exact timestamp when the customer confirms.
+              await supabase.from('sms_conversations')
+                .update({ content: lastAssistantMsg.content + ' (time: ' + parsedCheck.toISOString() + ')' })
+                .eq('phone', phone).eq('role', 'assistant').eq('content', lastAssistantMsg.content);
+              console.log('[checkAndCreateJob] Time available — ISO annotated on last assistant message for ' + data.preferred_time);
             } else {
-              confirmMsg = 'Great news — ' + formatTimeForSMS(data.preferred_time) + ' is available! Does that work for you?';
-              await addToHistory(phone, 'assistant', confirmMsg + ' (time: ' + parsedCheck.toISOString() + ')');
-              await sendSMS(phone, confirmMsg);
-              console.log('[checkAndCreateJob] Time available — asked customer to confirm: ' + data.preferred_time);
+              console.log('[checkAndCreateJob] Time available — ISO already annotated or no prior assistant message');
             }
           } else {
             var altSlot = null;
