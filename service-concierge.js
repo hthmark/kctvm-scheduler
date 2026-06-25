@@ -139,11 +139,9 @@ async function identifyCustomer(phone) {
 // MUST be called before any conflict detection — outside_hours and conflict are separate paths
 async function checkTimeStatus(parsedDate) {
   var calMod = require('./service-calendar');
-  var p = parsedDate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
-  var m = p.match(/(\d+):(\d+)/);
-  if (!m) return { status: 'conflict' };
-  var mins = parseInt(m[1]) * 60 + parseInt(m[2]);
-  if (mins > 19 * 60 || mins < 7 * 60) return { status: 'outside_hours' };
+  var chicagoHour = parsedDate.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false });
+  var hour = parseInt(chicagoHour);
+  if (hour < 7 || hour >= 19) return { status: 'outside_hours' };
   var available = false;
   try { available = await calMod.isTimeAvailable(parsedDate); } catch(e) {}
   return { status: available ? 'available' : 'conflict' };
