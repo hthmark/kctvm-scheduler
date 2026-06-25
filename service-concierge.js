@@ -669,35 +669,40 @@ function needsMountTypeQuestion(messages) {
 }
 
 function getSpecialOrderEarliestDate(requestedTime) {
-  var now = new Date();
-  var earliest = new Date(now);
-  earliest.setDate(earliest.getDate() + 2);
-  var requestedHour = 9;
+  var requestedHour = 17; // default 5 PM
+  var requestedMinute = 0;
+  var baseDate = null;
+
   if (requestedTime) {
     try {
-      // Use attemptDateParse to handle natural language like "tomorrow at 5pm"
       var calMod = require('./service-calendar');
       var parsed = calMod.attemptDateParse(requestedTime);
       if (parsed && !isNaN(parsed.getTime())) {
-        var h = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false });
-        requestedHour = parseInt(h) || 9;
+        baseDate = parsed;
+        var hStr = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: false });
+        var hm = hStr.match(/(\d+):(\d+)/);
+        if (hm) { requestedHour = parseInt(hm[1]); requestedMinute = parseInt(hm[2]); }
       } else {
-        // Fallback: extract hour directly from string e.g. "5pm", "5:00 PM"
-        var timeMatch = requestedTime.match(/(\d{1,2})(?::\d{2})?\s*(am|pm)/i);
+        var timeMatch = requestedTime.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
         if (timeMatch) {
-          var h2 = parseInt(timeMatch[1]);
-          var ampm = timeMatch[2].toLowerCase();
-          if (ampm === 'pm' && h2 !== 12) h2 += 12;
-          if (ampm === 'am' && h2 === 12) h2 = 0;
-          requestedHour = h2;
+          requestedHour = parseInt(timeMatch[1]);
+          requestedMinute = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+          var ampm = timeMatch[3].toLowerCase();
+          if (ampm === 'pm' && requestedHour !== 12) requestedHour += 12;
+          if (ampm === 'am' && requestedHour === 12) requestedHour = 0;
         }
       }
     } catch(e) {}
   }
-  // Build the date in Chicago time by constructing local date parts
-  var dateStr = earliest.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+
+  // Add exactly 72 hours to the base date (or now if no base)
+  var base = baseDate || new Date();
+  var result = new Date(base.getTime() + 72 * 60 * 60 * 1000);
+
+  // Preserve the requested hour:minute in Chicago time on that resulting date
+  var dateStr = result.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
   var parts = dateStr.split('/');
-  var chicagoDate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), requestedHour, 0, 0, 0);
+  var chicagoDate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), requestedHour, requestedMinute, 0, 0);
   var offset = new Date(chicagoDate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
   return new Date(chicagoDate.getTime() + (chicagoDate - offset));
 }
