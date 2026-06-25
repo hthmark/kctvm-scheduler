@@ -319,8 +319,10 @@ function buildSystemPrompt(customerType, job, nextSlot) {
       '  If you do NOT have their name: "Great! It\'ll be $[X] total — does that work for you?"\n' +
       'STEP 4 — AFTER PRICE CONFIRMED:\n' +
       '  If you still do NOT have their name: ask for it now before anything else.\n' +
-      '  If you already have their name: ask city and time in one message: "What city are you in and what time works best for you?"\n' +
+      '  If you already have their name AND a time was already mentioned anywhere in the conversation: ask for city only — do NOT ask for a time again.\n' +
+      '  If you already have their name AND no time has been mentioned anywhere in the conversation: ask city and time together: "What city are you in and what time works best for you?"\n' +
       'CRITICAL: NEVER ask for city, preferred time, or scheduling info before the customer has confirmed the price.\n' +
+      'CRITICAL: If the customer mentioned a time at any point in the conversation (including their very first message), never ask for a time again — use that time.\n' +
       'Once you have name use it naturally in conversation.\n';
   }
 
