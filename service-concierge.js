@@ -49,7 +49,7 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'EXAMPLE: TV1=50" fixed mount brick wire ($140+$60+$150+$150=$500), TV2=40" own mount drywall no wire ($70) → Total $570\n' +
   'When quoting, always show the breakdown per TV then the total. Ask "unless you have your own mount?" when a mount is needed.\n' +
   'We do NOT install new outlets. If no outlet on the wall, ask if they are flexible on TV placement.\n' +
-  '- TVs 65" or larger: Include the lift question in the SAME message as the price quote — do NOT send it as a separate message. After stating the price (and online order notice if applicable), add: "Just a heads up — since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price of the installation and I\'d hate to do that to you."\n' +
+  '- TVs 65" or larger where we supply the mount: After the customer confirms price, send the lift question as its own separate message — do NOT include it in the price quote message. The lift question is ONLY sent after price is confirmed.\n' +
   '  If no one can help with lift: say "Let me get Gabe on this for you" and route to manual.\n\n' +
   'TV SIZE IDENTIFICATION:\n' +
   '- If customer does not know their TV size, say: "There\'s generally a serial, model and make white sticker on the back of the TV. If you\'re able to send that over or take a photo of it I can help you determine the size and which mount would work best!"\n' +
@@ -349,6 +349,12 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     context + '\n' +
     slotInstruction + '\n' +
     KNOWLEDGE_BASE + '\n\n' +
+    'LARGE TV SEQUENCE (65"+ where we supply the mount) — follow this order strictly, one step per message:\n' +
+    'Step 1 — Mount type question (handled in code, not by you)\n' +
+    'Step 2 — Once mount type is confirmed: quote price with full breakdown. If special order (articulating >86" or fixed >110"), include the 2-day online order notice AND the special order date in the same message. End with "Does that work for you?"\n' +
+    'Step 3 — After customer confirms price: send ONLY the lift question: "Just a heads up — since it\'s 65\"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price and I\'d hate to do that to you."\n' +
+    'Step 4 — After customer confirms lift: the job submits automatically.\n' +
+    'NEVER skip a step. NEVER combine steps. One question per turn.\n\n' +
     'SCHEDULING RULES:\n' +
     'Do NOT ask for city or time until the customer has confirmed the price — this is the most important rule.\n' +
     'NEVER suggest or propose a time unless the customer has told you a specific time or said soonest/earliest/asap. If they have not mentioned a time, just ask: "What day and time works best for you?"\n' +
@@ -438,24 +444,35 @@ async function checkAndCreateJob(phone, history) {
     '- TV #1 labor: under 65"=$140, 65"+ =$160\n' +
     '- TV #2+ labor: under 65"=$70, 65"+ =$80 (NOT $140/$160 — these are additional TV rates)\n' +
     '- Fixed mount (only if we source it, tv_N_mount="fixed"): +$60 per TV\n' +
-    '- Articulating mount (only if we source it, tv_N_mount="articulating"): +$120 per TV\n' +
+    '- Articulating mount 86" and under (only if we source it, tv_N_mount="articulating"): +$120 per TV\n' +
+    '- Articulating mount over 86" (special order, tv_N_mount="articulating"): +$230 per TV\n' +
     '- Brick wall: +$150 per TV\n' +
     '- Wire concealment (tv_N_wire="cable"): +$150 per TV\n' +
     '- If tv_N_mount="yes" customer has own mount — NO mount add-on cost\n' +
     'Example: TV1=55" own mount drywall no wire = $140. TV2=75" articulating drywall wire = $80+$120+$150 = $350. Total = $490.\n\n' +
+    'LIFT CONFIRMATION — set lift_confirmed:\n' +
+    '- lift_confirmed=true if: (a) the TV is under 65", OR (b) the customer owns their own mount (tv_N_mount="yes"), OR (c) KCTVM asked the lift question ("we might need a hand lifting") and the customer replied yes/yeah/sure/ok/no worries/someone can help/etc.\n' +
+    '- lift_confirmed=false if: the TV is 65"+ AND we supply the mount AND KCTVM has not yet asked the lift question, OR asked it but customer has not yet replied.\n' +
+    '- If customer says no one can help with lift: set lift_confirmed="manual" — do not set ready=true.\n\n' +
     'TIME CONFIRMATION RULES — set time_confirmed=true ONLY when ALL of these are true:\n' +
-    '1. The customer has already agreed to the total price earlier in the conversation (not just been quoted it). A customer reply of "yes to both", "yes to all", "both yes", "yep both", or any clear affirmative to multiple questions at once (e.g. price + lift question asked together) counts as price confirmation — do NOT require a standalone yes to the price question alone.\n' +
+    '1. The customer has already agreed to the total price earlier in the conversation (not just been quoted it). A customer reply of "yes to both", "yes to all", "both yes", "yep both", or any clear affirmative to multiple questions at once counts as price confirmation.\n' +
     '2. The customer has explicitly agreed to a specific time — not just mentioned one\n' +
     '3. That agreement was a direct response to either: (a) KCTVM acknowledging the customer\'s stated time preference, OR (b) KCTVM proposing a specific alternative slot and the customer saying yes/ok/sure/works/etc., OR (c) KCTVM sent a bare-time confirm like "2pm today?" or "11am tomorrow?" as an entire message and the customer replied yes/yeah/yep/ok/sure/works/sounds good/perfect.\n' +
     'If customer only mentioned a time without being asked to confirm it, or if price has not yet been agreed to, set time_confirmed=false.\n' +
     'OUT-OF-HOURS REDIRECT RULE: If KCTVM sent a message containing "unfortunately that\'s a little late" or "7 AM to 7 PM", that message proposes a NEW time. Any customer yes/ok/sure from BEFORE that message does NOT confirm this new time. time_confirmed=true only if the customer\'s reply comes AFTER that out-of-hours message and directly confirms the new proposed slot.\n' +
     'BARE TIME CONFIRM: If KCTVM sent a message like "2pm today?" or "11am tomorrow?" and customer said yes — set time_confirmed=true AND set preferred_time to "today at [time]" or "tomorrow at [time]" accordingly (e.g. "today at 2pm" or "tomorrow at 11am").\n\n' +
     'preferred_time extraction: if an assistant message contains "(time: ISO_TIMESTAMP)" after proposing a slot, use that ISO string as preferred_time — not the human-readable label next to it.\n\n' +
-    'If ALL details are present and price is confirmed, respond with JSON only:\n' +
-    '{"ready":true,"time_confirmed":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
+    'READY RULES:\n' +
+    '- ready=true ONLY when: all job details present, price confirmed, time_confirmed=true, AND lift_confirmed=true.\n' +
+    '- If lift_confirmed=false: ready=false (lift question must be asked and answered first).\n' +
+    '- If lift_confirmed="manual": ready=false (route to Gabe).\n\n' +
+    'If ALL details are present and all confirmations done, respond with JSON only:\n' +
+    '{"ready":true,"time_confirmed":true,"lift_confirmed":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
     'tv_1_inches: use actual inch number from conversation. Under 65=small, 65+=large. Unknown small=52, unknown large=75.\n' +
-    'tv_1_mount values: "yes" = customer already has their own mount and we do NOT need to source one. "fixed" = we need to source and bring a fixed mount (+$60). "articulating" = we need to source and bring an articulating mount (+$120). If customer says "I have my own mount" or "I have a mount" or "I have a fixed mount" — use "yes", NOT "fixed".\n' +
-    'If price confirmed but time not yet explicitly confirmed: {"ready":true,"time_confirmed":false,...all other fields...}\n' +
+    'tv_1_mount values: "yes" = customer already has their own mount and we do NOT need to source one. "fixed" = we need to source and bring a fixed mount (+$60). "articulating" = we need to source and bring an articulating mount (+$120 or $230 for >86"). If customer says "I have my own mount" or "I have a mount" or "I have a fixed mount" — use "yes", NOT "fixed".\n' +
+    'If price confirmed but time not yet explicitly confirmed: {"ready":false,"time_confirmed":false,"lift_confirmed":true_or_false,...all other fields...}\n' +
+    'If lift question needed but not yet asked/answered: {"ready":false,"lift_confirmed":false,...}\n' +
+    'If lift_confirmed="manual": {"ready":false,"lift_confirmed":"manual",...}\n' +
     'If not complete: {"ready":false}\n' +
     'JSON only, no other text.';
 
@@ -470,6 +487,39 @@ async function checkAndCreateJob(phone, history) {
     console.log('[checkAndCreateJob] Extraction result: ' + JSON.stringify(data));
     if (!data.ready) {
       console.log('[checkAndCreateJob] BLOCKED — Claude says not ready');
+
+      // Handle lift_confirmed="manual" — route to Gabe
+      if (data.lift_confirmed === 'manual') {
+        var firstName = data.name ? data.name.split(' ')[0] : 'there';
+        var lastLiftMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+        var alreadyRouted = lastLiftMsg && /let me get gabe/i.test(lastLiftMsg.content);
+        if (!alreadyRouted) {
+          var manualMsg = 'No worries — let me get Gabe on this for you and he\'ll sort out the two-tech situation!';
+          await addToHistory(phone, 'assistant', manualMsg);
+          await sendSMS(phone, manualMsg);
+          if (shouldAlertOwner('lift:' + phone)) {
+            await sendSMS(OWNER_PHONE, '📱 TWO-TECH JOB\n' + (data.name || phone) + ' — ' + (data.city || 'unknown city') + '\nNo one available for lift. Manual scheduling needed.\nPhone: ' + phone);
+          }
+        }
+        return false;
+      }
+
+      // Handle lift_confirmed=false — send the lift question hardcoded
+      if (data.lift_confirmed === false && data.name) {
+        var liftFirstName = data.name.split(' ')[0];
+        var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+        var liftAlreadyAsked = lastMsg && /hand lifting|two techs/i.test(lastMsg.content);
+        if (!liftAlreadyAsked) {
+          var liftMsg = 'Just a heads up — since it\'s 65"+, we might need a hand lifting it onto the mount. Will someone be able to help us with that? If not, we\'d have to send out two techs which would generally double the price and I\'d hate to do that to you.';
+          await addToHistory(phone, 'assistant', liftMsg);
+          await sendSMS(phone, liftMsg);
+          console.log('[checkAndCreateJob] Lift question sent hardcoded for ' + phone);
+        } else {
+          console.log('[checkAndCreateJob] Lift question already asked — waiting for reply');
+        }
+        return false;
+      }
+
       return false;
     }
 

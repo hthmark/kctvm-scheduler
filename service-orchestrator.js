@@ -116,8 +116,9 @@ async function processNewJob(job) {
   if (outOfRangeTVs.length > 0) {
     const tvNums = outOfRangeTVs.map(t => `TV${t.tvNum} (${t.inches || t.size}", ${t.mount})`).join(', ');
     console.log(`[Orchestrator] Out-of-range TVs detected: ${tvNums} — alerting owner, continuing dispatch`);
+    const firstName = job.customer_name ? job.customer_name.split(' ')[0] : job.customer_name;
     await sendSMS(OWNER_PHONE,
-      `⚠️ MOUNT ORDER NEEDED (FYI)\n${job.customer_name} — ${job.city}\nTime: ${formatPreferredTime(job.preferred_time)}\nOut-of-range: ${tvNums}\nJob ID: ${job.id}`
+      `Heads up — ${firstName} needs a special order mount (${tvNums}). Job is ${formatPreferredTime(job.preferred_time)} in ${job.city}. Order the mount before then.\nJob ID: ${job.id}`
     );
   }
 
