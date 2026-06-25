@@ -86,8 +86,30 @@ function attemptDateParse(str) {
         target = new Date(today.getFullYear(), foundMonth, dayNum);
         if (target < today) target.setFullYear(today.getFullYear() + 1);
       } else {
-        console.warn('[Calendar] Could not parse: "' + str + '"');
-        return null;
+        // No day context at all — bare time like "2pm" or "11am"
+        // If a time match was found, resolve to today or tomorrow based on 4-hour threshold
+        if (timeMatch) {
+          // target is already today; check if today at this time is ≥4h from now
+          const testNow = new Date(target.getFullYear(), target.getMonth(), target.getDate(), hour, minute);
+          const nowMs = Date.now();
+          const chicagoOffsetMs = (() => {
+            const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', timeZoneName: 'shortOffset' });
+            const p = fmt.formatToParts(testNow).find(x => x.type === 'timeZoneName');
+            const m = p ? p.value.match(/GMT([+-]\d+)/) : null;
+            return (m ? parseInt(m[1]) : -5) * 60 * 60 * 1000;
+          })();
+          const todayAtTimeUTC = testNow.getTime() - chicagoOffsetMs;
+          if (todayAtTimeUTC - nowMs < 4 * 60 * 60 * 1000) {
+            // Too soon or past — use tomorrow
+            target.setDate(target.getDate() + 1);
+            console.log('[Calendar] Bare time "' + str + '" is <4h away today — using tomorrow');
+          } else {
+            console.log('[Calendar] Bare time "' + str + '" is ≥4h away — using today');
+          }
+        } else {
+          console.warn('[Calendar] Could not parse: "' + str + '"');
+          return null;
+        }
       }
     }
   }
