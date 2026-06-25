@@ -504,8 +504,8 @@ async function checkAndCreateJob(phone, history) {
         return false;
       }
 
-      // Handle lift_confirmed=false — send the lift question hardcoded
-      if (data.lift_confirmed === false && data.name) {
+      // Handle lift_confirmed=false — only AFTER price+time confirmed, never in same turn as price quote
+      if (data.lift_confirmed === false && data.time_confirmed === true && data.name) {
         var liftFirstName = data.name.split(' ')[0];
         var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
         var liftAlreadyAsked = lastMsg && /hand lifting|two techs/i.test(lastMsg.content);
@@ -675,10 +675,22 @@ function getSpecialOrderEarliestDate(requestedTime) {
   var requestedHour = 9;
   if (requestedTime) {
     try {
-      var parsed = new Date(requestedTime);
-      if (!isNaN(parsed.getTime())) {
+      // Use attemptDateParse to handle natural language like "tomorrow at 5pm"
+      var calMod = require('./service-calendar');
+      var parsed = calMod.attemptDateParse(requestedTime);
+      if (parsed && !isNaN(parsed.getTime())) {
         var h = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false });
         requestedHour = parseInt(h) || 9;
+      } else {
+        // Fallback: extract hour directly from string e.g. "5pm", "5:00 PM"
+        var timeMatch = requestedTime.match(/(\d{1,2})(?::\d{2})?\s*(am|pm)/i);
+        if (timeMatch) {
+          var h2 = parseInt(timeMatch[1]);
+          var ampm = timeMatch[2].toLowerCase();
+          if (ampm === 'pm' && h2 !== 12) h2 += 12;
+          if (ampm === 'am' && h2 === 12) h2 = 0;
+          requestedHour = h2;
+        }
       }
     } catch(e) {}
   }
