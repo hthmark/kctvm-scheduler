@@ -203,7 +203,7 @@ router.post('/inbound', async (req, res) => {
       const { data: activeJob } = await supabase
         .from('jobs').select('*')
         .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
-        .in('status', ['confirmed', 'awaiting_payment'])
+        .in('status', ['confirmed', 'awaiting_payment', 'awaiting_tech_reply'])
         .order('created_at', { ascending: false })
         .limit(1)
         .single();

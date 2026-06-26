@@ -428,11 +428,24 @@ async function _proceedWithRescheduleTime(job, newDate) {
     return;
   }
 
-  // Time is available — ask the confirmed tech
-  const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
+  // Time is available — ask the tech (confirmed_tech_id for post-payment, current_tech_id for awaiting_tech_reply)
+  const techId = job.confirmed_tech_id || job.current_tech_id;
+  if (!techId) {
+    console.warn(`[Orchestrator] _proceedWithRescheduleTime: no tech ID on job ${job.id} — alerting owner`);
+    await sendSMS(job.customer_phone, `Got it! Let me check with our team and get back to you shortly.`);
+    await sendSMS(OWNER_PHONE, `RESCHEDULE NEEDED (no tech)\nJob ${job.id} — ${job.customer_name} in ${job.city}\nNew time: ${formatPreferredTime(newDate.toISOString())}`);
+    return;
+  }
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+  if (!tech) {
+    console.warn(`[Orchestrator] _proceedWithRescheduleTime: tech ${techId} not found for job ${job.id}`);
+    await sendSMS(job.customer_phone, `Got it! Let me check with our team and get back to you shortly.`);
+    await sendSMS(OWNER_PHONE, `RESCHEDULE NEEDED (tech not found)\nJob ${job.id} — ${job.customer_name} in ${job.city}\nNew time: ${formatPreferredTime(newDate.toISOString())}`);
+    return;
+  }
   const displayTime = formatPreferredTime(newDate.toISOString());
   await updateJob(job.id, { status: 'rescheduling_tech_confirm', rescheduling_new_time: newDate.toISOString() });
-  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer wants to move your job in ${job.city} to ${displayTime}. Does that still work for you? Reply Yes or No.`);
+  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer for the ${job.city} job wants to move to ${displayTime} — still good for you? Reply Yes or No.`);
   console.log(`[Orchestrator] Reschedule requested for job ${job.id} → ${newDate.toISOString()}, awaiting tech ${tech.name} reply`);
 }
 
@@ -446,9 +459,15 @@ async function handleRescheduleReply(job, techId, reply) {
     // Delete old calendar event, create new one
     if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
     const newEventId = await createJobEvent(job, newDate);
-    await confirmJobEvent(newEventId, job.confirmed_tech_name);
+    // Use confirmed_tech_name if available, otherwise look up the tech by id
+    const techName = job.confirmed_tech_name || (() => {
+      const { data: t } = supabase.from('technicians').select('name').eq('id', techId).single();
+      return t ? t.name : null;
+    })();
+    await confirmJobEvent(newEventId, techName);
     await updateJob(job.id, {
       status: 'confirmed',
+      confirmed_tech_id: techId,
       preferred_time: job.rescheduling_new_time,
       scheduled_time: newDate.toISOString(),
       calendar_event_id: newEventId,
