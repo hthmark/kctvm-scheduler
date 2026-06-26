@@ -152,7 +152,19 @@ async function handleTechReply(jobId, techId, reply) {
   const normalized = reply.trim().toLowerCase();
   await supabase.from('tech_contacts').update({ status: normalized === 'yes' ? 'accepted' : 'declined', replied_at: new Date().toISOString() }).eq('job_id', jobId).eq('tech_id', techId);
   if (normalized === 'yes') {
-    await techAccepted(job, techId);
+    // If customer already paid (confirmed_tech_id set and paid_at present), this is a reschedule
+    // confirmation — don't re-send payment link, just re-confirm the updated time
+    if (job.confirmed_tech_id && job.paid_at) {
+      const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+      if (job.calendar_event_id) await confirmJobEvent(job.calendar_event_id, tech ? tech.name : null);
+      await updateJob(jobId, { status: 'confirmed', confirmed_tech_id: techId, confirmed_tech_name: tech ? tech.name : job.current_tech_name });
+      const displayTime = formatPreferredTime(job.preferred_time);
+      if (tech) await sendSMS(tech.phone, `Great, you're all set for the rescheduled ${job.city} job at ${displayTime}! See you then ${tech.name.split(' ')[0]}.`);
+      await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]} — rescheduled to ${displayTime}!`);
+      console.log(`[Orchestrator] Job ${jobId} reschedule confirmed by tech ${techId} → confirmed`);
+    } else {
+      await techAccepted(job, techId);
+    }
   } else {
     await updateJob(jobId, { tech_search_index: job.tech_search_index + 1 });
     await dispatchToNextTech(jobId);
@@ -443,7 +455,6 @@ async function _proceedWithRescheduleTime(job, newDate) {
       console.log(`[Reschedule] isTimeAvailable(${newDate.toISOString()}) = ${available}`);
     } catch (calErr) {
       console.error(`[Reschedule] Calendar check failed for job ${job.id}:`, calErr.message);
-      // Calendar error — do not treat as conflict, alert owner and bail
       await sendSMS(job.customer_phone, `Got it! Let me check with our team and I'll get back to you shortly.`);
       await sendSMS(OWNER_PHONE, `RESCHEDULE — calendar check failed\nJob ${job.id} — ${job.customer_name} in ${job.city}\nRequested: ${formatPreferredTime(newDate.toISOString())}\nError: ${calErr.message}`);
       return;
@@ -461,7 +472,7 @@ async function _proceedWithRescheduleTime(job, newDate) {
       return;
     }
 
-    // Time is available — ask the tech (confirmed_tech_id for post-payment, current_tech_id for awaiting_tech_reply)
+    // Time is available — use confirmed_tech_id for post-payment jobs, current_tech_id otherwise
     const techId = job.confirmed_tech_id || job.current_tech_id;
     console.log(`[Reschedule] Time available — techId=${techId}`);
     if (!techId) {
@@ -480,12 +491,34 @@ async function _proceedWithRescheduleTime(job, newDate) {
       return;
     }
 
+    // Delete old calendar event and create a new one for the rescheduled time
+    if (job.calendar_event_id) {
+      await deleteJobEvent(job.calendar_event_id).catch(err =>
+        console.warn(`[Reschedule] Could not delete old calendar event ${job.calendar_event_id}:`, err.message)
+      );
+      console.log(`[Reschedule] Deleted old calendar event ${job.calendar_event_id}`);
+    }
+    const newEventId = await createJobEvent(job, newDate);
+    console.log(`[Reschedule] Created new calendar event ${newEventId}`);
+
     const displayTime = formatPreferredTime(newDate.toISOString());
-    console.log(`[Reschedule] Updating job ${job.id} → rescheduling_tech_confirm, texting tech ${tech.name}`);
-    await updateJob(job.id, { status: 'rescheduling_tech_confirm', rescheduling_new_time: newDate.toISOString() });
+
+    // Update job with new time — clear rescheduling_new_time, re-arm for tech reply
+    await updateJob(job.id, {
+      status: 'awaiting_tech_reply',
+      preferred_time: newDate.toISOString(),
+      scheduled_time: newDate.toISOString(),
+      calendar_event_id: newEventId,
+      rescheduling_new_time: null,
+      current_tech_id: techId,
+      current_tech_name: tech.name,
+      tech_notified_at: new Date().toISOString(),
+    });
+    console.log(`[Reschedule] Job ${job.id} updated → awaiting_tech_reply for ${displayTime}`);
+
     await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer for the ${job.city} job wants to move to ${displayTime} — still good for you? Reply Yes or No.`);
     await sendSMS(job.customer_phone, `Got it! Let me confirm the new time with our tech and I'll get back to you shortly.`);
-    console.log(`[Reschedule] _proceedWithRescheduleTime DONE — job ${job.id} awaiting tech reply from ${tech.name}`);
+    console.log(`[Reschedule] _proceedWithRescheduleTime DONE — job ${job.id} re-asked tech ${tech.name} for ${displayTime}`);
   } catch (err) {
     console.error(`[Reschedule] _proceedWithRescheduleTime ERROR for job ${job.id}:`, err.message, err.stack);
     await sendSMS(OWNER_PHONE, `RESCHEDULE ERROR\nJob ${job.id} — ${job.customer_name}\n${err.message}`).catch(() => {});
