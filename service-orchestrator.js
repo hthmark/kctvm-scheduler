@@ -368,85 +368,128 @@ async function handleLateCancellation(job, techId) {
 }
 
 async function handleRescheduleRequest(job, messageText) {
-  const newDate = attemptDateParse(messageText);
+  console.log(`[Reschedule] handleRescheduleRequest START — job ${job.id} status="${job.status}" msg="${messageText}"`);
+  try {
+    const newDate = attemptDateParse(messageText);
+    console.log(`[Reschedule] attemptDateParse result: ${newDate ? newDate.toISOString() : 'null'}`);
 
-  // Got a parseable future date — proceed directly
-  if (newDate) {
-    return await _proceedWithRescheduleTime(job, newDate);
-  }
-
-  // Time-only (no day) — propose a day and ask them to confirm
-  const timeText = extractTimeText(messageText);
-  if (timeText && !hasDay(messageText)) {
-    // Try today first, fall back to tomorrow
-    const todayDate = attemptDateParse('today at ' + timeText);
-    const proposedDate = (todayDate && todayDate > new Date()) ? todayDate : attemptDateParse('tomorrow at ' + timeText);
-    const dayLabel = (todayDate && todayDate > new Date()) ? 'today' : 'tomorrow';
-
-    if (proposedDate) {
-      await updateJob(job.id, { status: 'rescheduling_day_confirm', rescheduling_new_time: proposedDate.toISOString() });
-      await sendSMS(job.customer_phone, `${timeText} ${dayLabel}? Let me check and get back to you!`);
-      console.log(`[Orchestrator] Day-confirm needed for job ${job.id} — proposed ${dayLabel} at ${timeText} (${proposedDate.toISOString()})`);
-      return;
+    // Got a parseable future date — proceed directly
+    if (newDate) {
+      console.log(`[Reschedule] Full date parsed — proceeding directly for job ${job.id}`);
+      return await _proceedWithRescheduleTime(job, newDate);
     }
-  }
 
-  // Can't parse anything useful
-  await sendSMS(job.customer_phone, `What day and time works better for you?`);
+    // Time-only (no day) — propose a day and ask them to confirm
+    const timeText = extractTimeText(messageText);
+    console.log(`[Reschedule] extractTimeText="${timeText}" hasDay=${hasDay(messageText)}`);
+    if (timeText && !hasDay(messageText)) {
+      const todayDate = attemptDateParse('today at ' + timeText);
+      const proposedDate = (todayDate && todayDate > new Date()) ? todayDate : attemptDateParse('tomorrow at ' + timeText);
+      const dayLabel = (todayDate && todayDate > new Date()) ? 'today' : 'tomorrow';
+      console.log(`[Reschedule] Proposing ${dayLabel} at ${timeText} → ${proposedDate ? proposedDate.toISOString() : 'null'}`);
+
+      if (proposedDate) {
+        await updateJob(job.id, { status: 'rescheduling_day_confirm', rescheduling_new_time: proposedDate.toISOString() });
+        await sendSMS(job.customer_phone, `${timeText} ${dayLabel}? Let me check and get back to you!`);
+        console.log(`[Reschedule] Day-confirm sent for job ${job.id} — ${dayLabel} at ${timeText} (${proposedDate.toISOString()})`);
+        return;
+      }
+    }
+
+    // Can't parse anything useful
+    console.log(`[Reschedule] Could not parse time from "${messageText}" — asking customer`);
+    await sendSMS(job.customer_phone, `What day and time works better for you?`);
+  } catch (err) {
+    console.error(`[Reschedule] handleRescheduleRequest ERROR for job ${job.id}:`, err.message, err.stack);
+    await sendSMS(OWNER_PHONE, `RESCHEDULE ERROR\nJob ${job.id} — ${job.customer_name}\n${err.message}`).catch(() => {});
+  }
 }
 
 async function handleRescheduleConfirmDay(job, messageText) {
-  const msgLower = messageText.toLowerCase().trim();
-  const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|sounds good|perfect|great)$/i.test(msgLower);
+  console.log(`[Reschedule] handleRescheduleConfirmDay START — job ${job.id} msg="${messageText}" stored="${job.rescheduling_new_time}"`);
+  try {
+    const msgLower = messageText.toLowerCase().trim();
+    const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|sounds good|perfect|great)$/i.test(msgLower);
+    console.log(`[Reschedule] isAffirmative=${isAffirmative} hasDay=${hasDay(messageText)}`);
 
-  let newDate;
-  if (isAffirmative || !hasDay(messageText)) {
-    // Customer confirmed the proposed day — use stored time
-    newDate = job.rescheduling_new_time ? new Date(job.rescheduling_new_time) : null;
-  } else {
-    // Customer gave a different day/time — parse it
-    newDate = attemptDateParse(messageText);
+    let newDate;
+    if (isAffirmative || !hasDay(messageText)) {
+      newDate = job.rescheduling_new_time ? new Date(job.rescheduling_new_time) : null;
+      console.log(`[Reschedule] Using stored time: ${newDate ? newDate.toISOString() : 'null'}`);
+    } else {
+      newDate = attemptDateParse(messageText);
+      console.log(`[Reschedule] Customer gave new time, parsed: ${newDate ? newDate.toISOString() : 'null'}`);
+    }
+
+    if (!newDate || isNaN(newDate.getTime())) {
+      console.log(`[Reschedule] Could not resolve date — asking customer again`);
+      await sendSMS(job.customer_phone, `What day and time works better for you?`);
+      return;
+    }
+
+    await _proceedWithRescheduleTime(job, newDate);
+  } catch (err) {
+    console.error(`[Reschedule] handleRescheduleConfirmDay ERROR for job ${job.id}:`, err.message, err.stack);
+    await sendSMS(OWNER_PHONE, `RESCHEDULE ERROR\nJob ${job.id} — ${job.customer_name}\n${err.message}`).catch(() => {});
   }
-
-  if (!newDate || isNaN(newDate.getTime())) {
-    await sendSMS(job.customer_phone, `What day and time works better for you?`);
-    return;
-  }
-
-  await _proceedWithRescheduleTime(job, newDate);
 }
 
 async function _proceedWithRescheduleTime(job, newDate) {
-  const available = await isTimeAvailable(newDate).catch(() => false);
-  if (!available) {
-    const alt = await findNextAvailableTime(null).catch(() => null);
-    if (alt) {
-      await sendSMS(job.customer_phone, `That time is taken — how about ${alt.label}? Does that work?`);
-    } else {
-      await sendSMS(job.customer_phone, `Sorry, none of our techs are available for that time — would you like to try a different day or time?`);
+  console.log(`[Reschedule] _proceedWithRescheduleTime START — job ${job.id} newDate=${newDate.toISOString()} confirmed_tech_id=${job.confirmed_tech_id} current_tech_id=${job.current_tech_id}`);
+  try {
+    let available = false;
+    try {
+      available = await isTimeAvailable(newDate);
+      console.log(`[Reschedule] isTimeAvailable(${newDate.toISOString()}) = ${available}`);
+    } catch (calErr) {
+      console.error(`[Reschedule] Calendar check failed for job ${job.id}:`, calErr.message);
+      // Calendar error — do not treat as conflict, alert owner and bail
+      await sendSMS(job.customer_phone, `Got it! Let me check with our team and I'll get back to you shortly.`);
+      await sendSMS(OWNER_PHONE, `RESCHEDULE — calendar check failed\nJob ${job.id} — ${job.customer_name} in ${job.city}\nRequested: ${formatPreferredTime(newDate.toISOString())}\nError: ${calErr.message}`);
+      return;
     }
-    return;
-  }
 
-  // Time is available — ask the tech (confirmed_tech_id for post-payment, current_tech_id for awaiting_tech_reply)
-  const techId = job.confirmed_tech_id || job.current_tech_id;
-  if (!techId) {
-    console.warn(`[Orchestrator] _proceedWithRescheduleTime: no tech ID on job ${job.id} — alerting owner`);
-    await sendSMS(job.customer_phone, `Got it! Let me check with our team and get back to you shortly.`);
-    await sendSMS(OWNER_PHONE, `RESCHEDULE NEEDED (no tech)\nJob ${job.id} — ${job.customer_name} in ${job.city}\nNew time: ${formatPreferredTime(newDate.toISOString())}`);
-    return;
+    if (!available) {
+      console.log(`[Reschedule] Time not available for job ${job.id} — finding alt`);
+      const alt = await findNextAvailableTime(null).catch(() => null);
+      if (alt) {
+        await sendSMS(job.customer_phone, `That time is taken — how about ${alt.label}? Does that work?`);
+        console.log(`[Reschedule] Proposed alt ${alt.label} to customer`);
+      } else {
+        await sendSMS(job.customer_phone, `Sorry, none of our techs are available for that time — would you like to try a different day or time?`);
+      }
+      return;
+    }
+
+    // Time is available — ask the tech (confirmed_tech_id for post-payment, current_tech_id for awaiting_tech_reply)
+    const techId = job.confirmed_tech_id || job.current_tech_id;
+    console.log(`[Reschedule] Time available — techId=${techId}`);
+    if (!techId) {
+      console.warn(`[Reschedule] No tech ID on job ${job.id} — alerting owner`);
+      await sendSMS(job.customer_phone, `Got it! Let me check with our team and get back to you shortly.`);
+      await sendSMS(OWNER_PHONE, `RESCHEDULE NEEDED (no tech ID)\nJob ${job.id} — ${job.customer_name} in ${job.city}\nNew time: ${formatPreferredTime(newDate.toISOString())}`);
+      return;
+    }
+
+    const { data: tech, error: techErr } = await supabase.from('technicians').select('*').eq('id', techId).single();
+    console.log(`[Reschedule] Tech lookup — id=${techId} found=${!!tech} error=${techErr ? techErr.message : 'none'}`);
+    if (!tech) {
+      console.warn(`[Reschedule] Tech ${techId} not found for job ${job.id}`);
+      await sendSMS(job.customer_phone, `Got it! Let me check with our team and get back to you shortly.`);
+      await sendSMS(OWNER_PHONE, `RESCHEDULE NEEDED (tech not found id=${techId})\nJob ${job.id} — ${job.customer_name} in ${job.city}\nNew time: ${formatPreferredTime(newDate.toISOString())}`);
+      return;
+    }
+
+    const displayTime = formatPreferredTime(newDate.toISOString());
+    console.log(`[Reschedule] Updating job ${job.id} → rescheduling_tech_confirm, texting tech ${tech.name}`);
+    await updateJob(job.id, { status: 'rescheduling_tech_confirm', rescheduling_new_time: newDate.toISOString() });
+    await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer for the ${job.city} job wants to move to ${displayTime} — still good for you? Reply Yes or No.`);
+    await sendSMS(job.customer_phone, `Got it! Let me confirm the new time with our tech and I'll get back to you shortly.`);
+    console.log(`[Reschedule] _proceedWithRescheduleTime DONE — job ${job.id} awaiting tech reply from ${tech.name}`);
+  } catch (err) {
+    console.error(`[Reschedule] _proceedWithRescheduleTime ERROR for job ${job.id}:`, err.message, err.stack);
+    await sendSMS(OWNER_PHONE, `RESCHEDULE ERROR\nJob ${job.id} — ${job.customer_name}\n${err.message}`).catch(() => {});
   }
-  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
-  if (!tech) {
-    console.warn(`[Orchestrator] _proceedWithRescheduleTime: tech ${techId} not found for job ${job.id}`);
-    await sendSMS(job.customer_phone, `Got it! Let me check with our team and get back to you shortly.`);
-    await sendSMS(OWNER_PHONE, `RESCHEDULE NEEDED (tech not found)\nJob ${job.id} — ${job.customer_name} in ${job.city}\nNew time: ${formatPreferredTime(newDate.toISOString())}`);
-    return;
-  }
-  const displayTime = formatPreferredTime(newDate.toISOString());
-  await updateJob(job.id, { status: 'rescheduling_tech_confirm', rescheduling_new_time: newDate.toISOString() });
-  await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer for the ${job.city} job wants to move to ${displayTime} — still good for you? Reply Yes or No.`);
-  console.log(`[Orchestrator] Reschedule requested for job ${job.id} → ${newDate.toISOString()}, awaiting tech ${tech.name} reply`);
 }
 
 async function handleRescheduleReply(job, techId, reply) {
