@@ -68,12 +68,14 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
-      // Tech has a job awaiting reply
-      const { data: pendingJob } = await supabase
-        .from('jobs').select('id, status, current_tech_id')
+      // Tech has a job awaiting reply — match to the most recently dispatched job for this tech
+      const { data: pendingJobs } = await supabase
+        .from('jobs').select('id, status, current_tech_id, tech_notified_at')
         .eq('current_tech_id', tech.id)
         .eq('status', 'awaiting_tech_reply')
-        .single();
+        .order('tech_notified_at', { ascending: false })
+        .limit(1);
+      const pendingJob = pendingJobs?.[0] || null;
 
       if (pendingJob) {
         if (bodyLower === 'yes' || bodyLower === 'y') {

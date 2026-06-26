@@ -90,15 +90,19 @@ const KNOWLEDGE_BASE = 'KANSAS CITY TV MOUNTING PRICING:\n' +
   'TV SIZE FROM PHOTO: If a customer sends a photo of the TV sticker/label, identify the model number and determine the screen size. Tell them the size and confirm pricing. Use it to also recommend the correct mount type if needed.\n\n' +
   'GABE\'S STYLE: Casual, friendly, short sentences. "Amazing!", "Perfect!", "No worries!" Not corporate. Not a bot. Never mention Walmart, Home Depot, or any store name to customers.';
 
-async function getHistory(phone) {
+async function getHistory(phone, afterTimestamp) {
   try {
-    var result = await supabase
+    var query = supabase
       .from('sms_conversations')
       .select('role, content')
       .eq('phone', phone)
       .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: true })
       .limit(20);
+    if (afterTimestamp) {
+      query = query.gt('created_at', afterTimestamp);
+    }
+    var result = await query;
     return result.data || [];
   } catch (err) {
     console.error('[Concierge] getHistory error:', err.message);
@@ -728,7 +732,9 @@ async function handleConciergeMessage(from, body, mediaUrls) {
     var info = await identifyCustomer(from);
     console.log('[Concierge] Customer type: ' + info.type);
 
-    var history = await getHistory(from);
+    // For returning customers, only show history after their last completed job — never mix old booking conversations into a fresh one
+    var historyCutoff = (info.type === 'returning' && info.job && info.job.completed_at) ? info.job.completed_at : null;
+    var history = await getHistory(from, historyCutoff);
     var msgLower = body.toLowerCase();
 
     // Detect job change requests for post-booking customers
@@ -829,7 +835,7 @@ async function handleConciergeMessage(from, body, mediaUrls) {
         return m.role === 'user' && m.content.match(/\d{1,2}(:\d{2})?\s*(am|pm)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i);
       });
       if (hasSpecificTimeInHistory) {
-        var updatedHistory = await getHistory(from);
+        var updatedHistory = await getHistory(from, historyCutoff);
         await checkAndCreateJob(from, updatedHistory.concat([{role:'user',content:body},{role:'assistant',content:reply}]), specialOrderISO);
       }
     }
