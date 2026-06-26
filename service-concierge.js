@@ -329,11 +329,13 @@ function buildSystemPrompt(customerType, job, nextSlot) {
       'STEP 3 — SOFT CLOSE: Once you have all 4 job details (size, mount type must be fixed/articulating/own — never unknown, wall, wire), calculate the total price and send the soft close:\n' +
       '  If you have their name: "Great [name]! It\'ll be $[X] total — does that work for you?"\n' +
       '  If you do NOT have their name: "Great! It\'ll be $[X] total — does that work for you?"\n' +
-      'STEP 4 — AFTER PRICE CONFIRMED:\n' +
-      '  If you still do NOT have their name: ask for it now before anything else.\n' +
-      '  If you already have their name AND a time was already mentioned anywhere in the conversation: ask for city only — do NOT ask for a time again.\n' +
-      '  If you already have their name AND no time has been mentioned anywhere in the conversation: ask city and time together: "What city are you in and what time works best for you?"\n' +
+      'STEP 4 — AFTER PRICE CONFIRMED — follow this exact sequence, one step per message:\n' +
+      '  4a) NAME: If no name has been given anywhere in this conversation, ask ONLY: "Do you mind if I grab your name?" — nothing else in that message. Do NOT skip this even if the customer gave a time or city in their first message.\n' +
+      '  4b) SCHEDULING: Once you have their name (or if you already had it), ask for scheduling info:\n' +
+      '      - If a time was already mentioned anywhere in the conversation: ask for city only — do NOT ask for time again.\n' +
+      '      - If no time has been mentioned: ask city and time together: "What city are you in and what time works best for you?"\n' +
       'CRITICAL: NEVER ask for city, preferred time, or scheduling info before the customer has confirmed the price.\n' +
+      'CRITICAL: NEVER ask for name and scheduling info in the same message.\n' +
       'CRITICAL: If the customer mentioned a time at any point in the conversation (including their very first message), never ask for a time again — use that time.\n' +
       'Once you have name use it naturally in conversation.\n';
   }
