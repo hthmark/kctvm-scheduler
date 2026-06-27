@@ -467,7 +467,8 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
     '- lift_confirmed=false if: the TV is 65"+ AND we supply the mount AND KCTVM has not yet asked the lift question, OR asked it but customer has not yet replied.\n' +
     '- If customer says no one can help with lift: set lift_confirmed="manual" — do not set ready=true.\n\n' +
     'BARE TIME EXTRACTION: If KCTVM sent a message like "2pm today?" or "11am tomorrow?" and customer said yes — set preferred_time to "today at [time]" or "tomorrow at [time]" accordingly (e.g. "today at 2pm" or "tomorrow at 11am").\n' +
-    'preferred_time extraction: if an assistant message contains "(time: ISO_TIMESTAMP)" after proposing a slot, use that ISO string as preferred_time — not the human-readable label next to it.\n\n' +
+    'preferred_time extraction: if an assistant message contains "(time: ISO_TIMESTAMP)" after proposing a slot, use that ISO string as preferred_time — not the human-readable label next to it.\n' +
+    'ALT TIME REJECTION RULE: If the customer says "no" to a proposed alt time but in the same message proposes a new time (e.g. "no would have to be later can we do Monday 6pm?"), extract preferred_time from the new time they proposed. The "no" means they are rejecting the alt — it does NOT mean they have no preferred time. Never set preferred_time to null when a new time appears in the same message as the rejection.\n\n' +
     'READY RULES:\n' +
     '- ready=true ONLY when: name, city, preferred_time, num_tvs, and tv_1_size are all present, price has been confirmed by the customer, AND lift_confirmed=true.\n' +
     '- time_confirmed is NOT required for ready=true — do not block on it.\n' +
