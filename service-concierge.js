@@ -466,13 +466,7 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
     '- lift_confirmed=true if: (a) the TV is under 65", OR (b) the customer owns their own mount (tv_N_mount="yes"), OR (c) KCTVM asked the lift question ("we might need a hand lifting") and the customer replied yes/yeah/sure/ok/no worries/someone can help/etc.\n' +
     '- lift_confirmed=false if: the TV is 65"+ AND we supply the mount AND KCTVM has not yet asked the lift question, OR asked it but customer has not yet replied.\n' +
     '- If customer says no one can help with lift: set lift_confirmed="manual" — do not set ready=true.\n\n' +
-    'TIME CONFIRMATION RULES — set time_confirmed=true ONLY when ALL of these are true:\n' +
-    '1. The customer has already agreed to the total price earlier in the conversation (not just been quoted it). A customer reply of "yes to both", "yes to all", "both yes", "yep both", or any clear affirmative to multiple questions at once counts as price confirmation.\n' +
-    '2. The customer has explicitly agreed to a specific time — not just mentioned one\n' +
-    '3. That agreement was a direct response to either: (a) KCTVM acknowledging the customer\'s stated time preference, OR (b) KCTVM proposing a specific alternative slot and the customer saying yes/ok/sure/works/etc., OR (c) KCTVM sent a bare-time confirm like "2pm today?" or "11am tomorrow?" as an entire message and the customer replied yes/yeah/yep/ok/sure/works/sounds good/perfect.\n' +
-    'If customer only mentioned a time without being asked to confirm it, or if price has not yet been agreed to, set time_confirmed=false.\n' +
-    'OUT-OF-HOURS REDIRECT RULE: If KCTVM sent a message containing "unfortunately that\'s a little late" or "7 AM to 7 PM", that message proposes a NEW time. Any customer yes/ok/sure from BEFORE that message does NOT confirm this new time. time_confirmed=true only if the customer\'s reply comes AFTER that out-of-hours message and directly confirms the new proposed slot.\n' +
-    'BARE TIME CONFIRM: If KCTVM sent a message like "2pm today?" or "11am tomorrow?" and customer said yes — set time_confirmed=true AND set preferred_time to "today at [time]" or "tomorrow at [time]" accordingly (e.g. "today at 2pm" or "tomorrow at 11am").\n\n' +
+    'BARE TIME EXTRACTION: If KCTVM sent a message like "2pm today?" or "11am tomorrow?" and customer said yes — set preferred_time to "today at [time]" or "tomorrow at [time]" accordingly (e.g. "today at 2pm" or "tomorrow at 11am").\n' +
     'preferred_time extraction: if an assistant message contains "(time: ISO_TIMESTAMP)" after proposing a slot, use that ISO string as preferred_time — not the human-readable label next to it.\n\n' +
     'READY RULES:\n' +
     '- ready=true ONLY when: name, city, preferred_time, num_tvs, and tv_1_size are all present, price has been confirmed by the customer, AND lift_confirmed=true.\n' +
@@ -497,6 +491,28 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
     var text = r.content[0].text.trim().replace(/```json|```/g, '');
     var data = JSON.parse(text);
     console.log('[checkAndCreateJob] Extraction result: ' + JSON.stringify(data));
+
+    // Code-level override: if extractor says not ready but all required fields are present
+    // and the customer's last message is an affirmative, force ready=true.
+    // This bypasses the extractor's internal time_confirmed gate.
+    if (!data.ready) {
+      var hasAllFields = data.name && data.city && data.preferred_time &&
+                         data.total_price && data.num_tvs && data.tv_1_size &&
+                         data.lift_confirmed === true;
+      var lastUserMsg = history.slice().reverse().find(function(m) { return m.role === 'user'; });
+      var lastUserText = (lastUserMsg && lastUserMsg.content || '').toLowerCase().trim();
+      var affirmatives = ['yes','yeah','yep','yup','sure','ok','okay','sounds good','perfect',
+                          'works','that works','great','correct','confirmed','do it','go ahead',
+                          'absolutely','definitely'];
+      var priceConfirmed = affirmatives.some(function(w) {
+        return lastUserText === w || lastUserText.includes(w);
+      });
+      if (hasAllFields && priceConfirmed) {
+        console.log('[checkAndCreateJob] Code-level override — forcing ready=true (extractor blocked on time_confirmed)');
+        data.ready = true;
+      }
+    }
+
     if (!data.ready) {
       console.log('[checkAndCreateJob] BLOCKED — Claude says not ready');
 
