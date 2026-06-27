@@ -500,14 +500,29 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
       var hasAllFields = data.name && data.city && data.preferred_time &&
                          data.total_price && data.num_tvs && data.tv_1_size &&
                          data.lift_confirmed === true;
-      var lastUserMsg = history.slice().reverse().find(function(m) { return m.role === 'user'; });
-      var lastUserText = (lastUserMsg && lastUserMsg.content || '').toLowerCase().trim();
       var affirmatives = ['yes','yeah','yep','yup','sure','ok','okay','sounds good','perfect',
                           'works','that works','great','correct','confirmed','do it','go ahead',
                           'absolutely','definitely'];
-      var priceConfirmed = affirmatives.some(function(w) {
-        return lastUserText === w || lastUserText.includes(w);
-      });
+      // Find the assistant message that quoted the price, then check if any user message
+      // after it is affirmative — so "no can we do 2pm?" doesn't erase an earlier "yes".
+      var priceConfirmed = false;
+      var priceQuoteIndex = -1;
+      for (var i = 0; i < history.length; i++) {
+        if (history[i].role === 'assistant' && /\$\d+/.test(history[i].content)) {
+          priceQuoteIndex = i;
+        }
+      }
+      if (priceQuoteIndex >= 0) {
+        for (var j = priceQuoteIndex + 1; j < history.length; j++) {
+          if (history[j].role === 'user') {
+            var uText = (history[j].content || '').toLowerCase().trim();
+            if (affirmatives.some(function(w) { return uText === w || uText.includes(w); })) {
+              priceConfirmed = true;
+              break;
+            }
+          }
+        }
+      }
       if (hasAllFields && priceConfirmed) {
         console.log('[checkAndCreateJob] Code-level override — forcing ready=true (extractor blocked on time_confirmed)');
         data.ready = true;
