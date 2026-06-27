@@ -131,6 +131,8 @@ async function handleAddOn(jobId, customerPhone, addons) {
 
   // Text tech with updated job details
   if (tech) {
+    const totalPayout = (parseFloat(job.base_payout) || 0) + addonPayout;
+    console.log('[JobChange] Tech payout updated — base: $' + (parseFloat(job.base_payout) || 0) + ' + addon: $' + addonPayout + ' = total: $' + totalPayout);
     let updateMsg = 'Hey ' + tech.name.split(' ')[0] + ', update on the ' + job.city + ' job —';
     if (addons.tvs) {
       addons.tvs.forEach(function(tv) {
@@ -140,7 +142,7 @@ async function handleAddOn(jobId, customerPhone, addons) {
     if (addons.wireConceals) {
       updateMsg += ' Customer added wire concealment for ' + addons.wireConceals + ' TV(s).';
     }
-    updateMsg += ' New total payout: $' + newBasePayout + '. Thanks!';
+    updateMsg += ' Updated payout: $' + totalPayout + ' total. Thanks!';
     await sendSMS(tech.phone, updateMsg);
   }
 
