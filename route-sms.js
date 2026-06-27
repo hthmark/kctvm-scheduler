@@ -196,14 +196,31 @@ router.post('/inbound', async (req, res) => {
     }
 
     // ── CHECK FOR RESCHEDULE REQUEST ─────────────────────────────────────────
-    const rescheduleKeywords = ['reschedule', 'change', 'move', 'different time', 'different day', 'can we do', 'can you come'];
-    const isRescheduleRequest = rescheduleKeywords.some(kw => bodyLower.includes(kw));
+    // Strong reschedule signals — fire on their own
+    const rescheduleStrongSignals = [
+      'reschedule', 'change', 'move', 'different time', 'different day',
+      'can we do', 'can i do', 'how about', 'what about'
+    ];
+    // Weak change-of-mind signals — only fire when paired with a time expression
+    const rescheduleWeakSignals = ['actually', 'instead'];
+    const rescheduleTimeExpressions = [
+      /\b\d{1,2}(:\d{2})?\s*(am|pm)\b/i,
+      /\btomorrow\b/i,
+      /\bmonday\b|\btuesday\b|\bwednesday\b|\bthursday\b|\bfriday\b|\bsaturday\b|\bsunday\b/i,
+      /\bnext\s+(week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i,
+      /\bthis\s+(morning|afternoon|evening)\b/i,
+      /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i,
+    ];
+    const hasStrongSignal = rescheduleStrongSignals.some(kw => bodyLower.includes(kw));
+    const hasWeakSignal = rescheduleWeakSignals.some(kw => bodyLower.includes(kw));
+    const hasTimeExpression = rescheduleTimeExpressions.some(re => re.test(bodyLower));
+    const isRescheduleRequest = hasStrongSignal || (hasWeakSignal && hasTimeExpression);
 
     if (isRescheduleRequest && body) {
       const { data: activeJob } = await supabase
         .from('jobs').select('*')
         .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
-        .in('status', ['confirmed', 'awaiting_payment', 'awaiting_tech_reply'])
+        .not('status', 'in', '("completed","cancelled")')
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
