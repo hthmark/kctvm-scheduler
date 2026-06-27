@@ -335,11 +335,11 @@ function buildSystemPrompt(customerType, job, nextSlot) {
       '      - If BOTH a time AND a city are already known from anywhere in the conversation: skip all scheduling questions and send the TIME CONFIRMATION MESSAGE immediately (see TIME CONFIRMATION MESSAGE rule below).\n' +
       '      - If a time was already mentioned but city is not yet known: ask for city only — do NOT ask for time again.\n' +
       '      - If no time has been mentioned: ask city and time together: "What city are you in and what time works best for you?"\n' +
-      '  4c) TIME CONFIRMATION MESSAGE: As soon as you have name, city, and time — send this and nothing else:\n' +
-      '      "That\'ll work! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n' +
-      '      Replace [time] with the customer\'s stated time and [city] with the exact city they gave. Do NOT say "let me check on availability." Do NOT ask any further questions. This is the last message before the job is booked.\n' +
+      '  4c) HOLD MESSAGE: As soon as you have name, city, and time — send ONLY this exact message and nothing else:\n' +
+      '      "Let me check that time for you!"\n' +
+      '      Do NOT include the time, the city, or any payment link language. Do NOT ask any further questions. This is the last message before the job is booked.\n' +
       'SINGLE-MESSAGE FLOW: If the customer provides name, city, TV details, and preferred time all in their opening message (or before price confirmation), the flow after their yes to price is:\n' +
-      '  Mount type question (if needed) → Price quote → Customer says yes → TIME CONFIRMATION MESSAGE immediately. No intermediate steps.\n' +
+      '  Mount type question (if needed) → Price quote → Customer says yes → HOLD MESSAGE ("Let me check that time for you!") immediately. No intermediate steps.\n' +
       'CRITICAL: NEVER ask for city, preferred time, or scheduling info before the customer has confirmed the price.\n' +
       'CRITICAL: NEVER ask for name and scheduling info in the same message.\n' +
       'CRITICAL: If the customer mentioned a time at any point in the conversation (including their very first message), never ask for a time again — use that time.\n' +
@@ -374,9 +374,9 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'MID-CONVERSATION CHANGES:\n' +
     'If a customer changes or adds a job detail (e.g. "actually I need a mount", "add wire concealment", "I want articulating instead"), treat it as a pricing update — NOT a response to any scheduling question. Acknowledge the change, recalculate the total using the pricing rules, and confirm the new price: e.g. "No worries! That\'ll add $60 so your total comes to $200 — does that work for you?" Only after they confirm the updated price should you continue with scheduling.\n' +
     'CRITICAL TIME RULES:\n' +
-    '1. Customer requested specific time WITH a day (e.g. "tomorrow at 2pm", "Friday at 11am") and price has already been confirmed AND name and city are known: send the TIME CONFIRMATION MESSAGE: "That\'ll work! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!" — do NOT say "let me check on availability." Do NOT ask any follow-up questions.\n' +
+    '1. Customer requested specific time WITH a day (e.g. "tomorrow at 2pm", "Friday at 11am") and price has already been confirmed AND name and city are known: send ONLY: "Let me check that time for you!" — do NOT include the time, city, or payment link language. Do NOT ask any follow-up questions.\n' +
     '2. Proposing earliest available time: say "I see we have an opening at [time] — does that work for you?"\n' +
-    '3. When customer confirms earliest time: send the TIME CONFIRMATION MESSAGE: "That\'ll work! I\'ll put you down for [time] in [city] but let me confirm with my techs just to be 100% sure — once that\'s done I\'ll reach back out with a payment link and you\'ll be all set!"\n' +
+    '3. When customer confirms earliest time: send ONLY: "Let me check that time for you!" — no time, no city, no payment link language.\n' +
     (nextSlot && nextSlot.afterHours ? '' :
     'BARE TIME HANDLING (no day specified, e.g. "2pm", "11am", "3:30pm") — only applies when the requested time is within 7 AM–7 PM:\n' +
     'Current Kansas City time: ' + new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true }) + '\n' +
@@ -668,7 +668,16 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
         }
         return false;
       }
-      // dateStatus.status === 'available' → fall through to job submission
+      // dateStatus.status === 'available' — send time confirmation before submitting
+      var confirmTime = formatTimeForSMS(parsedDate.toISOString());
+      var confirmMsg = "That'll work! I'll put you down for " + confirmTime + ' in ' + data.city + " but let me confirm with my techs just to be 100% sure — once that's done I'll reach back out with a payment link and you'll be all set!";
+      var lastMsgConfirm = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
+      var alreadyConfirmed = lastMsgConfirm && /let me confirm with my techs/i.test(lastMsgConfirm.content);
+      if (!alreadyConfirmed) {
+        await addToHistory(phone, 'assistant', confirmMsg);
+        await sendSMS(phone, confirmMsg);
+        console.log('[checkAndCreateJob] Time confirmation sent for ' + phone + ' at ' + confirmTime);
+      }
     }
 
     console.log('[checkAndCreateJob] SUBMITTING job for ' + phone + ' at ' + data.preferred_time);
