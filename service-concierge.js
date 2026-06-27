@@ -493,6 +493,23 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
     var data = JSON.parse(text);
     console.log('[checkAndCreateJob] Extraction result: ' + JSON.stringify(data));
 
+    // Code-level preferred_time fallback: if extractor dropped the time (e.g. customer
+    // said "no can we do 2pm tomorrow?" and "no" caused it to return null), scan user
+    // messages in reverse for the most recent parseable time expression.
+    if (!data.preferred_time) {
+      var calModFallback = require('./service-calendar');
+      for (var fi = history.length - 1; fi >= 0; fi--) {
+        if (history[fi].role !== 'user') continue;
+        var fMsg = history[fi].content || '';
+        var fParsed = calModFallback.attemptDateParse(fMsg);
+        if (fParsed && !isNaN(fParsed.getTime()) && fParsed > new Date()) {
+          data.preferred_time = fParsed.toISOString();
+          console.log('[checkAndCreateJob] Recovered preferred_time from message: "' + fMsg + '" → ' + fParsed.toISOString());
+          break;
+        }
+      }
+    }
+
     // Code-level override: if extractor says not ready but all required fields are present
     // and the customer's last message is an affirmative, force ready=true.
     // This bypasses the extractor's internal time_confirmed gate.
