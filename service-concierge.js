@@ -298,11 +298,11 @@ function buildSystemPrompt(customerType, job, nextSlot) {
         'City: ' + job.city + '\n' +
         'Tech: ' + (job.confirmed_tech_name || 'being assigned') + '\n\n' +
         'POST-BOOKING CHANGE RULES:\n' +
-        '- If they want to ADD another TV: collect the new TV details (size, mount, wall, wire), calculate the add-on price, confirm with them, then alert Gabe to update the job and send a new invoice. Say: "Absolutely! Let me get the details for the additional TV and I\'ll update your booking right away."\n' +
+        '- If they want to ADD another TV: collect any missing details (size, mount, wall, wire), calculate the add-on price, confirm with them. If ALL details (size, mount type, wall type, wire preference) are already in their message, skip straight to the price confirmation — do NOT prepend "Let me get the details" or any opener. Only ask for details if something is actually missing.\n' +
         '- If they want to ADD wire concealment: confirm the price (+$150), say you\'ll update the booking, alert Gabe.\n' +
         '- If they want to change the TIME before tech arrives: collect new time, say "Let me check that for you!" and alert Gabe to reschedule.\n' +
         '- If they ask about something we don\'t offer: decline gracefully.\n' +
-        '- For ANY job change: after collecting details, say "Let me sort that out for you and I\'ll be right back with you!" then alert Gabe.\n' +
+        '- For ANY job change: after collecting/confirming details, say "Let me sort that out for you and I\'ll be right back with you!" then alert Gabe.\n' +
         '- If payment is pending, remind them their payment link was already sent.\n';
     } else {
       context = 'ACTIVE JOB — PRE-BOOKING: This customer has a job in progress but not yet confirmed.\n' +
@@ -377,6 +377,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     '1. Customer requested specific time WITH a day (e.g. "tomorrow at 2pm", "Friday at 11am") and price has already been confirmed AND name and city are known: send ONLY: "Let me check that time for you!" — do NOT include the time, city, or payment link language. Do NOT ask any follow-up questions.\n' +
     '2. Proposing earliest available time: say "I see we have an opening at [time] — does that work for you?"\n' +
     '3. When customer confirms earliest time: send ONLY: "Let me check that time for you!" — no time, no city, no payment link language.\n' +
+    '4. ALT TIME CONFIRMATION — CRITICAL: When the customer says yes to a proposed alt time (e.g. you offered "Sun, 6/28 9:30 AM" due to a conflict and they said "yes" or "that works"), send ONLY: "Let me sort that out for you and I\'ll be right back with you!" — do NOT say "Perfect!", do NOT mention a payment link, do NOT say "you\'re all set", do NOT confirm the booking. The booking is handled automatically in the background.\n' +
     (nextSlot && nextSlot.afterHours ? '' :
     'BARE TIME HANDLING (no day specified, e.g. "2pm", "11am", "3:30pm") — only applies when the requested time is within 7 AM–7 PM:\n' +
     'Current Kansas City time: ' + new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true }) + '\n' +
