@@ -460,6 +460,15 @@ async function handleRescheduleConfirmDay(job, messageText) {
 async function _proceedWithRescheduleTime(job, newDate) {
   console.log(`[Reschedule] _proceedWithRescheduleTime START — job ${job.id} newDate=${newDate.toISOString()} confirmed_tech_id=${job.confirmed_tech_id} current_tech_id=${job.current_tech_id}`);
   try {
+    // Delete the existing calendar event before checking availability so the job's
+    // own event doesn't block the slot the customer is trying to move to.
+    if (job.calendar_event_id) {
+      await deleteJobEvent(job.calendar_event_id).catch(err =>
+        console.warn(`[Reschedule] Could not delete existing calendar event ${job.calendar_event_id}:`, err.message)
+      );
+      console.log(`[Reschedule] Deleted existing calendar event ${job.calendar_event_id} before availability check`);
+    }
+
     let available = false;
     try {
       available = await isTimeAvailable(newDate);
@@ -504,13 +513,7 @@ async function _proceedWithRescheduleTime(job, newDate) {
       return;
     }
 
-    // Delete old calendar event and create a new one for the rescheduled time
-    if (job.calendar_event_id) {
-      await deleteJobEvent(job.calendar_event_id).catch(err =>
-        console.warn(`[Reschedule] Could not delete old calendar event ${job.calendar_event_id}:`, err.message)
-      );
-      console.log(`[Reschedule] Deleted old calendar event ${job.calendar_event_id}`);
-    }
+    // Create a new calendar event for the rescheduled time
     const newEventId = await createJobEvent(job, newDate);
     console.log(`[Reschedule] Created new calendar event ${newEventId}`);
 
