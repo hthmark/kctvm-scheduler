@@ -144,11 +144,21 @@ async function handleAddOn(jobId, customerPhone, addons) {
     let updateMsg = 'Hey ' + tech.name.split(' ')[0] + ', update on the ' + job.city + ' job —';
     if (addons.tvs) {
       addons.tvs.forEach(function(tv) {
-        updateMsg += ' customer added a ' + (tv.inches || (tv.size === 'large' ? '65"+ ' : 'under 65" ')) + 'TV on ' + tv.wall + ' with ' + tv.mount + ' mount' + (tv.wire === 'cable' ? ' and wire concealment' : '') + '.';
+        updateMsg += ' customer added a ' + (tv.inches || (tv.size === 'large' ? '65"+ ' : 'under 65" ')) + '" TV on ' + tv.wall + ' with ' + tv.mount + ' mount' + (tv.wire === 'cable' ? ' and wire concealment' : '') + '.';
       });
     }
     if (addons.wireConceals) {
-      updateMsg += ' Customer added wire concealment for ' + addons.wireConceals + ' TV(s).';
+      // Rebuild full TV list with updated wire status for the tech
+      const updatedNumTvs = job.num_tvs || 1;
+      updateMsg += ' Customer added wire concealment for ' + addons.wireConceals + ' TV(s). Updated job summary:';
+      for (let i = 1; i <= updatedNumTvs; i++) {
+        const tvSize = job['tv_' + i + '_size'] || 'unknown';
+        const tvInches = job['tv_' + i + '_inches'] || (tvSize === 'large' ? '65"+' : 'under 65"');
+        const tvMount = job['tv_' + i + '_mount'] || 'own';
+        const tvWall = job['tv_' + i + '_wall'] || 'drywall';
+        const tvWire = i <= addons.wireConceals ? 'wire concealment' : 'no wire';
+        updateMsg += ' TV' + i + ': ' + tvInches + '" ' + tvWall + ' ' + tvMount + ' mount ' + tvWire + '.';
+      }
     }
     updateMsg += ' Updated payout: $' + totalPayout + ' total. Thanks!';
     await sendSMS(tech.phone, updateMsg);

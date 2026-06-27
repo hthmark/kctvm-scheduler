@@ -429,14 +429,16 @@ async function handlePostBookingChange(from, body, job, reply, messages) {
       return (m.role === 'user' ? 'Customer' : 'KCTVM') + ': ' + content;
     }).join('\n');
 
+    var existingTvCount = job.num_tvs || 1;
     var addonExtractPrompt = 'Given this SMS conversation about a TV mounting add-on, extract the add-on details the customer wants added to their existing booking.\n\n' +
+      'The existing booking already has ' + existingTvCount + ' TV(s).\n\n' +
       'Conversation:\n' + conversationText + '\n\n' +
       'Return JSON only — no other text:\n' +
       '{"tvs":[{"size":"small or large","inches":55,"mount":"yes or fixed or articulating","wall":"drywall or brick","wire":"no or cable"}],"wireConceals":0}\n' +
       'size: "small" if under 65", "large" if 65"+. inches: actual number if mentioned, else 52 for small or 75 for large.\n' +
       'mount: "yes" if customer has their own mount, "fixed" if we supply fixed, "articulating" if we supply articulating.\n' +
       'wire: "cable" if they want wire concealment, "no" otherwise.\n' +
-      'wireConceals: number of standalone wire concealment add-ons (not attached to a TV). Usually 0.\n' +
+      'wireConceals: number of standalone wire concealment add-ons (not attached to a new TV being added). Use this when the customer says "wire concealment for both TVs", "wire concealment for all TVs", "wire concealment for both", or any phrasing that applies wire concealment to the TVs already on the booking (not a new TV). In that case set wireConceals=' + existingTvCount + ' and do NOT add a new TV entry. Only set wireConceals=0 if no such request is made.\n' +
       'Only include TVs being ADDED — not the original TV(s) already in the booking.\n' +
       'If no TV add-on is clear from the conversation, return {"tvs":[],"wireConceals":0}.';
 
@@ -448,6 +450,7 @@ async function handlePostBookingChange(from, body, job, reply, messages) {
     var addonText = extractResp.content[0].text.trim().replace(/```json|```/g, '');
     var addons = JSON.parse(addonText);
     console.log('[PostBooking] Add-on extracted: ' + JSON.stringify(addons));
+    console.log('[JobChange] wireConceals extracted: ' + (addons.wireConceals || 0) + ' for job ' + job.id);
 
     if ((!addons.tvs || addons.tvs.length === 0) && !addons.wireConceals) {
       console.log('[PostBooking] No add-on details extracted — skipping handleAddOn');
