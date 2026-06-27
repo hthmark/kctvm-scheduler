@@ -621,16 +621,7 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
         }
         return false;
       }
-      // dateStatus.status === 'available' — send time confirmation before submitting
-      var confirmTime = formatTimeForSMS(parsedDate.toISOString());
-      var confirmMsg = "That'll work! I'll put you down for " + confirmTime + ' in ' + data.city + " but let me confirm with my techs just to be 100% sure — once that's done I'll reach back out with a payment link and you'll be all set!";
-      var lastMsgConfirm = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-      var alreadyConfirmed = lastMsgConfirm && /let me confirm with my techs/i.test(lastMsgConfirm.content);
-      if (!alreadyConfirmed) {
-        await addToHistory(phone, 'assistant', confirmMsg);
-        await sendSMS(phone, confirmMsg);
-        console.log('[checkAndCreateJob] Time confirmation sent for ' + phone + ' at ' + confirmTime);
-      }
+      // dateStatus.status === 'available' — fall through to job submission
     }
 
     console.log('[checkAndCreateJob] SUBMITTING job for ' + phone + ' at ' + data.preferred_time);
