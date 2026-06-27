@@ -432,7 +432,7 @@ async function handleRescheduleConfirmDay(job, messageText) {
   console.log(`[Reschedule] handleRescheduleConfirmDay START — job ${job.id} msg="${messageText}" stored="${job.rescheduling_new_time}"`);
   try {
     const msgLower = messageText.toLowerCase().trim();
-    const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|sounds good|perfect|great)$/i.test(msgLower);
+    const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|that'll work|sounds good|perfect|great|absolutely|definitely|correct|confirmed|confirm|lets do it|let's do it|do it|go ahead|sounds great|works for me|that'll do|good|all good)$/i.test(msgLower);
     console.log(`[Reschedule] isAffirmative=${isAffirmative} hasDay=${hasDay(messageText)}`);
 
     let newDate;
@@ -475,6 +475,8 @@ async function _proceedWithRescheduleTime(job, newDate) {
       console.log(`[Reschedule] Time not available for job ${job.id} — finding alt`);
       const alt = await findNextAvailableTime(null).catch(() => null);
       if (alt) {
+        await updateJob(job.id, { rescheduling_new_time: alt.raw });
+        console.log(`[Reschedule] Wrote alt rescheduling_new_time=${alt.raw} for job ${job.id}`);
         await sendSMS(job.customer_phone, `That time is taken — how about ${alt.label}? Does that work?`);
         console.log(`[Reschedule] Proposed alt ${alt.label} to customer`);
       } else {
