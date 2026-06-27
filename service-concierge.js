@@ -857,8 +857,13 @@ async function handleConciergeMessage(from, body, mediaUrls) {
     await addToHistory(from, 'user', body);
     await addToHistory(from, 'assistant', reply);
 
-    // Handle post-booking changes automatically
-    if (isJobChange) {
+    // Handle post-booking changes automatically.
+    // Also trigger when the concierge reply confirms an add-on even if the current
+    // message ("yes") contains no job-change keywords — the isJobChange gate misses
+    // the confirmation turn.
+    var replyConfirmsAddon = info.type === 'active' && info.job &&
+      /let me sort|sort that out|i'll sort|get that added/i.test(reply);
+    if (isJobChange || replyConfirmsAddon) {
       await handlePostBookingChange(from, body, info.job, reply, messages);
     }
 

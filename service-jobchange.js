@@ -58,6 +58,8 @@ function calcTechAddonPayout(addons) {
 
 // ─── ADD TV OR WIRE CONCEAL ───────────────────────────────────────────────────
 async function handleAddOn(jobId, customerPhone, addons) {
+  const tvCount = (addons.tvs || []).length;
+  console.log('[JobChange] Processing addon for job ' + jobId + ' — ' + tvCount + ' TV(s)');
   const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
   const { data: tech } = job.confirmed_tech_id
     ? await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single()
