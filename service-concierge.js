@@ -387,7 +387,7 @@ function buildSystemPrompt(customerType, job, nextSlot) {
     'Only say "Let me get Gabe on this for you" for genuine legal/liability issues — absolute last resort.\n';
 }
 
-async function handlePostBookingChange(from, body, job, reply) {
+async function handlePostBookingChange(from, body, job, reply, messages) {
   var msgLower = body.toLowerCase();
   var jobChange = require('./service-jobchange');
 
@@ -412,10 +412,52 @@ async function handlePostBookingChange(from, body, job, reply) {
     return;
   }
 
-  // Add-on — collect details via Claude then process
-  // For now alert Gabe — the concierge handles the conversation, then alerts
+  // Add-on — extract details from conversation with Claude and process via service-jobchange
+  // Only fire when the concierge reply indicates the customer confirmed (sorting it out)
+  var conciergeConfirmed = /let me sort|i'll sort|sort that out|added.*booking|get that added|i'll get that/i.test(reply);
+  if (!conciergeConfirmed) return;
+
+  // Alert owner in addition to processing
   if (shouldAlertOwner('addon:' + from)) {
-    await sendSMS(OWNER_PHONE, '📱 ADD-ON NEEDED\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + formatTimeForSMS(job.preferred_time) + ' in ' + job.city + '\nRequest: ' + body);
+    await sendSMS(OWNER_PHONE, '📱 ADD-ON PROCESSING\nCustomer: ' + job.customer_name + '\nPhone: ' + from + '\nJob: ' + formatTimeForSMS(job.preferred_time) + ' in ' + job.city + '\nRequest: ' + body);
+  }
+
+  try {
+    var conversationText = (messages || []).map(function(m) {
+      var content = typeof m.content === 'string' ? m.content : (m.content || []).map(function(c) { return c.text || ''; }).join(' ');
+      return (m.role === 'user' ? 'Customer' : 'KCTVM') + ': ' + content;
+    }).join('\n');
+
+    var addonExtractPrompt = 'Given this SMS conversation about a TV mounting add-on, extract the add-on details the customer wants added to their existing booking.\n\n' +
+      'Conversation:\n' + conversationText + '\n\n' +
+      'Return JSON only — no other text:\n' +
+      '{"tvs":[{"size":"small or large","inches":55,"mount":"yes or fixed or articulating","wall":"drywall or brick","wire":"no or cable"}],"wireConceals":0}\n' +
+      'size: "small" if under 65", "large" if 65"+. inches: actual number if mentioned, else 52 for small or 75 for large.\n' +
+      'mount: "yes" if customer has their own mount, "fixed" if we supply fixed, "articulating" if we supply articulating.\n' +
+      'wire: "cable" if they want wire concealment, "no" otherwise.\n' +
+      'wireConceals: number of standalone wire concealment add-ons (not attached to a TV). Usually 0.\n' +
+      'Only include TVs being ADDED — not the original TV(s) already in the booking.\n' +
+      'If no TV add-on is clear from the conversation, return {"tvs":[],"wireConceals":0}.';
+
+    var extractResp = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 200,
+      messages: [{ role: 'user', content: addonExtractPrompt }]
+    });
+    var addonText = extractResp.content[0].text.trim().replace(/```json|```/g, '');
+    var addons = JSON.parse(addonText);
+    console.log('[PostBooking] Add-on extracted: ' + JSON.stringify(addons));
+
+    if ((!addons.tvs || addons.tvs.length === 0) && !addons.wireConceals) {
+      console.log('[PostBooking] No add-on details extracted — skipping handleAddOn');
+      return;
+    }
+
+    await jobChange.handleAddOn(job.id, from, addons);
+    console.log('[PostBooking] handleAddOn completed for job ' + job.id);
+  } catch (err) {
+    console.error('[PostBooking] Add-on processing error:', err.message);
+    await sendSMS(OWNER_PHONE, '📱 ADD-ON ERROR\nJob ' + job.id + ' — ' + job.customer_name + '\n' + err.message);
   }
 }
 
@@ -817,7 +859,7 @@ async function handleConciergeMessage(from, body, mediaUrls) {
 
     // Handle post-booking changes automatically
     if (isJobChange) {
-      await handlePostBookingChange(from, body, info.job, reply);
+      await handlePostBookingChange(from, body, info.job, reply, messages);
     }
 
     // Alert owner for manual escalation
