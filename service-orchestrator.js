@@ -217,6 +217,11 @@ async function checkPaymentReminder(jobId, stage) {
 
 async function handlePaymentComplete(job, address) {
   await updateJob(job.id, { status: 'confirmed', customer_address: address, paid_at: new Date().toISOString() });
+
+  // Re-fetch job to get current state — add-ons may have updated TV fields and base_payout after dispatch
+  const { data: freshJob } = await supabase.from('jobs').select('*').eq('id', job.id).single();
+  job = freshJob || job;
+
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
   const { mountItems, wireItems, brickTVs } = buildSupplyList(job);
 
@@ -247,8 +252,9 @@ async function handlePaymentComplete(job, address) {
     supplySection += `\n\n🧱 BRICK — ${brickNums}: Bring masonry drill bits + anchors!`;
   }
 
-  const basePayout = calculateBasePayout(job);
-  await updateJob(job.id, { base_payout: basePayout });
+  // Use base_payout from DB (updated by add-on handler) — do not recalculate from stale fields
+  const basePayout = parseFloat(job.base_payout) || calculateBasePayout(job);
+  console.log(`[Orchestrator] Confirmed tech message — payout: $${basePayout}, TVs: ${tvLines.join(' | ')}`);
 
   const displayJobTime = formatPreferredTime(job.preferred_time);
   const techMsg = `Job confirmed & paid!\n${job.customer_name} — ${address}\nTime: ${displayJobTime}\n\n${tvLines.join('\n')}${supplySection}\n\nBase payout: $${basePayout}\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
