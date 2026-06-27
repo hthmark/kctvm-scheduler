@@ -1,5 +1,6 @@
 const twilio = require('twilio');
 const axios = require('axios');
+const { canSendSMS, recordSMS } = require('./service-ratelimit');
 
 const provider = process.env.SMS_PROVIDER || 'twilio';
 let twilioClient;
@@ -9,21 +10,45 @@ if (provider === 'twilio') {
 
 async function sendSMS(to, body) {
   const phone = to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`;
-  if (provider === 'twilio') {
-    const msg = await twilioClient.messages.create({
-      body, from: process.env.TWILIO_PHONE_NUMBER, to: phone,
-    });
-    console.log(`[SMS] Twilio sent to ${phone}: SID=${msg.sid}`);
-    return { success: true, sid: msg.sid };
+
+  // Rate limit check — blocks loops before they cost money
+  const { allowed, reason } = canSendSMS(phone);
+  if (!allowed) {
+    console.error(`[SMS] RATE LIMITED — blocked send to ${phone} (${reason}): "${body.substring(0, 50)}..."`);
+    return { success: false, blocked: true, reason };
   }
-  if (provider === 'telnyx') {
-    const resp = await axios.post('https://api.telnyx.com/v2/messages',
-      { from: process.env.TELNYX_PHONE_NUMBER, to: phone, text: body },
-      { headers: { Authorization: `Bearer ${process.env.TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
-    );
-    return { success: true, sid: resp.data.data.id };
+
+  try {
+    let result;
+    if (provider === 'twilio') {
+      const msg = await twilioClient.messages.create({
+        body, from: process.env.TWILIO_PHONE_NUMBER, to: phone,
+      });
+      result = { success: true, sid: msg.sid };
+      console.log(`[SMS] Twilio sent to ${phone}: SID=${msg.sid}`);
+    } else if (provider === 'telnyx') {
+      const resp = await axios.post('https://api.telnyx.com/v2/messages',
+        { from: process.env.TELNYX_PHONE_NUMBER, to: phone, text: body },
+        { headers: { Authorization: `Bearer ${process.env.TELNYX_API_KEY}`, 'Content-Type': 'application/json' } }
+      );
+      result = { success: true, sid: resp.data.data.id };
+      console.log(`[SMS] Telnyx sent to ${phone}: ID=${resp.data.data.id}`);
+    } else {
+      throw new Error(`Unknown SMS_PROVIDER: ${provider}`);
+    }
+
+    // Record successful send for rate limiting
+    recordSMS(phone);
+    return result;
+
+  } catch (err) {
+    if (err.response) {
+      console.error(`[SMS] Send failed to ${phone}: HTTP ${err.response.status} — ${JSON.stringify(err.response.data)}`);
+    } else {
+      console.error(`[SMS] Send failed to ${phone}:`, err.message);
+    }
+    return { success: false, error: err.message };
   }
-  throw new Error(`Unknown SMS_PROVIDER: ${provider}`);
 }
 
 module.exports = { sendSMS };
