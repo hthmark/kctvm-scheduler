@@ -93,37 +93,40 @@ async function handleAddOn(jobId, customerPhone, addons) {
     ...tvUpdates
   });
 
-  // Create add-on Stripe payment link
-  const addonJob = Object.assign({}, job, {
-    total_price: addonPrice,
-    num_tvs: addons.tvs ? addons.tvs.length : 0,
-    city: job.city,
-    preferred_time: job.preferred_time
-  });
-
+  // Create new Stripe payment link for the full new total
   let paymentUrl = null;
   try {
     const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-    const price = await stripe.prices.create({
+
+    // Deactivate the original payment link if we have its ID
+    if (job.stripe_payment_link_id) {
+      await stripe.paymentLinks.update(job.stripe_payment_link_id, { active: false }).catch(function(err) {
+        console.warn('[JobChange] Could not deactivate original payment link:', err.message);
+      });
+    }
+
+    const stripePrice = await stripe.prices.create({
       currency: 'usd',
-      unit_amount: Math.round(addonPrice * 100),
+      unit_amount: Math.round(newTotal * 100),
       product_data: {
-        name: 'Add-on: ' + (addons.tvs ? addons.tvs.length + ' TV(s)' : '') + (addons.wireConceals ? ' + Wire Concealment' : '') + ' — ' + job.city
+        name: 'TV Mounting — ' + job.city + ' (updated total)'
       }
     });
     const link = await stripe.paymentLinks.create({
-      line_items: [{ price: price.id, quantity: 1 }],
-      metadata: { job_id: jobId, addon: 'true' }
+      line_items: [{ price: stripePrice.id, quantity: 1 }],
+      metadata: { job_id: jobId, updated: 'true' }
     });
     paymentUrl = link.url;
+
+    // Store the new link on the job
+    await updateJob(jobId, { stripe_payment_link: paymentUrl });
   } catch (err) {
     console.error('[JobChange] Stripe addon error:', err.message);
   }
 
-  // Text customer with add-on payment link
-  const addOnDesc = addons.tvs ? addons.tvs.length + ' additional TV' + (addons.tvs.length > 1 ? 's' : '') : 'wire concealment';
+  // Text customer with updated full-total payment link
   await sendSMS(customerPhone,
-    'Got it! I\'ve added the ' + addOnDesc + ' to your booking. The add-on total is $' + addonPrice + '. Here\'s the payment link to cover the difference: ' + (paymentUrl || 'link coming shortly')
+    'We\'ve updated your booking to include the additional TV — please use this new payment link for the full amount and disregard the previous one: ' + (paymentUrl || 'link coming shortly')
   );
 
   // Text tech with updated job details
