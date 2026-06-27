@@ -475,14 +475,14 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
     'BARE TIME CONFIRM: If KCTVM sent a message like "2pm today?" or "11am tomorrow?" and customer said yes — set time_confirmed=true AND set preferred_time to "today at [time]" or "tomorrow at [time]" accordingly (e.g. "today at 2pm" or "tomorrow at 11am").\n\n' +
     'preferred_time extraction: if an assistant message contains "(time: ISO_TIMESTAMP)" after proposing a slot, use that ISO string as preferred_time — not the human-readable label next to it.\n\n' +
     'READY RULES:\n' +
-    '- ready=true ONLY when: all job details present, price confirmed, time_confirmed=true, AND lift_confirmed=true.\n' +
+    '- ready=true ONLY when: name, city, preferred_time, num_tvs, and tv_1_size are all present, price has been confirmed by the customer, AND lift_confirmed=true.\n' +
+    '- time_confirmed is NOT required for ready=true — do not block on it.\n' +
     '- If lift_confirmed=false: ready=false (lift question must be asked and answered first).\n' +
     '- If lift_confirmed="manual": ready=false (route to Gabe).\n\n' +
-    'If ALL details are present and all confirmations done, respond with JSON only:\n' +
-    '{"ready":true,"time_confirmed":true,"lift_confirmed":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
+    'If ALL details are present and ready, respond with JSON only:\n' +
+    '{"ready":true,"lift_confirmed":true,"name":"name","city":"exact city from conversation","preferred_time":"specific time e.g. tomorrow at 10am","num_tvs":1,"total_price":200,"tv_1_size":"small or large","tv_1_inches":55,"tv_1_mount":"yes or fixed or articulating","tv_1_wall":"drywall or brick","tv_1_wire":"no or cable"}\n' +
     'tv_1_inches: use actual inch number from conversation. Under 65=small, 65+=large. Unknown small=52, unknown large=75.\n' +
     'tv_1_mount values: "yes" = customer already has their own mount and we do NOT need to source one. "fixed" = we need to source and bring a fixed mount (+$60). "articulating" = we need to source and bring an articulating mount (+$120 or $230 for >86"). If customer says "I have my own mount" or "I have a mount" or "I have a fixed mount" — use "yes", NOT "fixed".\n' +
-    'If price confirmed but time not yet explicitly confirmed: {"ready":false,"time_confirmed":false,"lift_confirmed":true_or_false,...all other fields...}\n' +
     'If lift question needed but not yet asked/answered: {"ready":false,"lift_confirmed":false,...}\n' +
     'If lift_confirmed="manual": {"ready":false,"lift_confirmed":"manual",...}\n' +
     'If not complete: {"ready":false}\n' +
@@ -516,8 +516,8 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
         return false;
       }
 
-      // Handle lift_confirmed=false — only AFTER price+time confirmed, never in same turn as price quote
-      if (data.lift_confirmed === false && data.time_confirmed === true && data.name) {
+      // Handle lift_confirmed=false — only after price confirmed and details present, never in same turn as price quote
+      if (data.lift_confirmed === false && data.name && data.preferred_time) {
         var liftFirstName = data.name.split(' ')[0];
         var lastMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
         var liftAlreadyAsked = lastMsg && /hand lifting|two techs/i.test(lastMsg.content);
@@ -532,69 +532,6 @@ async function checkAndCreateJob(phone, history, specialOrderISO) {
         return false;
       }
 
-      return false;
-    }
-
-    if (!data.time_confirmed) {
-      console.log('[checkAndCreateJob] BLOCKED — time not yet confirmed by customer');
-      // Use this opportunity to proactively check availability and prompt customer to confirm
-      if (data.preferred_time) {
-        var calModCheck = require('./service-calendar');
-        var parsedCheck = calModCheck.attemptDateParse(data.preferred_time);
-        if (parsedCheck && parsedCheck > new Date()) {
-          var firstName = data.name ? data.name.split(' ')[0] : 'there';
-          var timeStatus = await checkTimeStatus(parsedCheck);
-
-          if (timeStatus.status === 'outside_hours') {
-            // ── OUTSIDE HOURS ─────────────────────────────────────────────────
-            // Completely separate from conflict — never use conflict language here
-            console.log('[checkAndCreateJob] Pre-confirm outside_hours — redirecting to tomorrow morning');
-            var tSlotPC = await findFirstSlotTomorrow().catch(() => null);
-            var lastAsstPC = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-            var alreadyProposedPC = lastAsstPC && /7 AM to 7 PM|late for us/i.test(lastAsstPC.content);
-            if (!alreadyProposedPC) {
-              var ahMsgPC = tSlotPC
-                ? 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. The earliest I have available tomorrow is ' + tSlotPC.label + '. Does that work for you?'
-                : 'Hey ' + firstName + ', unfortunately that\'s a little late for us — we run 7 AM to 7 PM. What morning time works for you?';
-              await addToHistory(phone, 'assistant', tSlotPC ? ahMsgPC + ' (time: ' + tSlotPC.raw + ')' : ahMsgPC);
-              await sendSMS(phone, ahMsgPC);
-            }
-
-          } else if (timeStatus.status === 'available') {
-            // ── CALENDAR AVAILABLE ────────────────────────────────────────────
-            // Concierge owns the customer-facing confirmation message. Record ISO
-            // so the extractor can pick it up when the customer confirms.
-            var lastAssistantMsg = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-            var isoAlreadyAnnotated = lastAssistantMsg && lastAssistantMsg.content.includes('(time: ' + parsedCheck.toISOString() + ')');
-            if (!isoAlreadyAnnotated && lastAssistantMsg) {
-              await supabase.from('sms_conversations')
-                .update({ content: lastAssistantMsg.content + ' (time: ' + parsedCheck.toISOString() + ')' })
-                .eq('phone', phone).eq('role', 'assistant').eq('content', lastAssistantMsg.content);
-              console.log('[checkAndCreateJob] Time available — ISO annotated for ' + data.preferred_time);
-            } else {
-              console.log('[checkAndCreateJob] Time available — ISO already annotated or no prior assistant message');
-            }
-
-          } else {
-            // ── CALENDAR CONFLICT ─────────────────────────────────────────────
-            // Only fires for in-hours times with a genuine booking conflict
-            var altSlot = null;
-            try { altSlot = await findNextAvailableTime(data.preferred_time); } catch(e) {}
-            if (altSlot) {
-              var lastAssistant = history.slice().reverse().find(function(m) { return m.role === 'assistant'; });
-              var alreadyProposed = lastAssistant && /(available|does that work|what time works|today\?|tomorrow\?)/i.test(lastAssistant.content);
-              if (!alreadyProposed) {
-                var altSmsTxt = 'Hey ' + firstName + ', looks like ' + formatTimeForSMS(data.preferred_time) + ' is already booked — but I have ' + altSlot.label + ' available. Does that work for you?';
-                await addToHistory(phone, 'assistant', altSmsTxt + ' (time: ' + altSlot.raw + ')');
-                await sendSMS(phone, altSmsTxt);
-                console.log('[checkAndCreateJob] Conflict — proposed ' + altSlot.label + ' (' + altSlot.raw + ')');
-              } else {
-                console.log('[checkAndCreateJob] Conflict already proposed in last message — skipping duplicate');
-              }
-            }
-          }
-        }
-      }
       return false;
     }
 
