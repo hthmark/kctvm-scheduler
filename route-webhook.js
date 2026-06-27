@@ -15,13 +15,21 @@ router.post('/quote', async (req, res) => {
     if (!payload.name || !payload.phone) {
       return res.status(400).json({ error: 'Missing required fields: name, phone' });
     }
+    const numTvs = parseInt(payload.num_tvs) || 1;
+    // Calculate base payout: $60 first TV, $40 each additional, $40 each wire concealment
+    let basePayout = 0;
+    for (let i = 1; i <= numTvs; i++) {
+      basePayout += i === 1 ? 60 : 40;
+      if (payload[`tv_${i}_wire`] === 'cable') basePayout += 40;
+    }
     const jobData = {
       customer_name: payload.name,
       customer_phone: payload.phone.startsWith('+') ? payload.phone : `+1${payload.phone.replace(/\D/g, '')}`,
       city: payload.city,
       preferred_time: payload.preferred_time,
-      num_tvs: parseInt(payload.num_tvs) || 1,
+      num_tvs: numTvs,
       total_price: parseFloat(payload.total_price) || 0,
+      base_payout: basePayout,
       status: 'new',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -40,6 +48,7 @@ router.post('/quote', async (req, res) => {
       return res.status(500).json({ error: 'Failed to create job' });
     }
     console.log(`[Webhook] Job created: ${job.id}`);
+    console.log(`[Webhook] base_payout set to $${basePayout} for job ${job.id}`);
     res.json({ success: true, job_id: job.id });
     processNewJob(job).catch(err => {
       console.error(`[Orchestrator] Error processing job ${job.id}:`, err);

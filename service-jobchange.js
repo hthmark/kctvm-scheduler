@@ -131,8 +131,16 @@ async function handleAddOn(jobId, customerPhone, addons) {
 
   // Text tech with updated job details
   if (tech) {
-    const totalPayout = (parseFloat(job.base_payout) || 0) + addonPayout;
-    console.log('[JobChange] Tech payout updated — base: $' + (parseFloat(job.base_payout) || 0) + ' + addon: $' + addonPayout + ' = total: $' + totalPayout);
+    // If base_payout wasn't stored at job creation, calculate it from TV fields
+    let storedBasePayout = parseFloat(job.base_payout) || 0;
+    if (!storedBasePayout && job.num_tvs) {
+      for (let i = 1; i <= job.num_tvs; i++) {
+        storedBasePayout += i === 1 ? 60 : 40;
+        if (job['tv_' + i + '_wire'] === 'cable') storedBasePayout += 40;
+      }
+    }
+    const totalPayout = storedBasePayout + addonPayout;
+    console.log('[JobChange] Tech payout updated — base: $' + storedBasePayout + ' + addon: $' + addonPayout + ' = total: $' + totalPayout);
     let updateMsg = 'Hey ' + tech.name.split(' ')[0] + ', update on the ' + job.city + ' job —';
     if (addons.tvs) {
       addons.tvs.forEach(function(tv) {
