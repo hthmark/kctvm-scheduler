@@ -181,7 +181,7 @@ async function techAccepted(job, techId) {
 }
 
 async function checkTechTimeouts() {
-  console.log('[TechTimeout] Checking for timed-out tech_search jobs');
+  console.log('[TechTimeout] Checking for timed-out awaiting_tech_reply jobs');
   const timeoutMinutes = parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 1;
   const cutoff = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const { data: jobs, error } = await supabase
@@ -190,6 +190,7 @@ async function checkTechTimeouts() {
     .eq('status', 'awaiting_tech_reply')
     .lt('tech_notified_at', cutoff);
   if (error) { console.error('[TechTimeout] Query error:', error.message); return; }
+  console.log(`[TechTimeout] Found ${(jobs || []).length} timed-out job(s)`);
   if (!jobs || jobs.length === 0) return;
   for (const job of jobs) {
     console.log(`[TechTimeout] Job ${job.id} timed out waiting for tech ${job.current_tech_id} — advancing`);
