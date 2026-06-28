@@ -46,22 +46,24 @@ router.post('/inbound', async (req, res) => {
     // ── CHECK IF SENDER IS A TECH ────────────────────────────────────────────
     const { data: techs, error: techLookupError } = await supabase
       .from('technicians').select('id, name')
-      .or(`phone.eq.${from},phone.eq.${e164From}`).limit(1);
+      .or(`phone.eq.${from},phone.eq.${e164From}`);
     const tech = techs?.[0] ?? null;
-    console.log(`[SMS Inbound] Tech lookup for ${from} (normalized: ${e164From}) — result: ${tech ? `found: ${tech.name} (${tech.id})` : `not found (${techLookupError?.message || 'no match'})`}`);
+    const techIds = (techs || []).map(t => t.id);
+    console.log(`[SMS Inbound] Tech lookup for ${from} (normalized: ${e164From}) — result: ${tech ? `found ${techs.length} tech(s): ${techs.map(t => `${t.name} (${t.id})`).join(', ')}` : `not found (${techLookupError?.message || 'no match'})`}`);
 
     if (tech) {
       console.log(`[SMS Inbound] Tech found: ${tech.name}, body: "${bodyLower}", media: ${mediaUrls.length}`);
 
       // Fetch tech's most relevant active job for debug visibility and status-based routing
-      const { data: techActiveJob } = await supabase
+      const techIdsCsv = techIds.join(',');
+      const { data: techActiveJobs } = await supabase
         .from('jobs').select('*')
-        .or(`confirmed_tech_id.eq.${tech.id},current_tech_id.eq.${tech.id}`)
+        .or(`confirmed_tech_id.in.(${techIdsCsv}),current_tech_id.in.(${techIdsCsv})`)
         .not('status', 'in', '("completed","cancelled")')
         .order('updated_at', { ascending: false })
-        .limit(1)
-        .single();
-      console.log(`[TechHandler] status="${techActiveJob?.status}" confirmed_tech_id="${techActiveJob?.confirmed_tech_id}" current_tech_id="${techActiveJob?.current_tech_id}" body="${body}"`);
+        .limit(1);
+      const techActiveJob = techActiveJobs?.[0] ?? null;
+      console.log(`[TechHandler] techIds=${JSON.stringify(techIds)} status="${techActiveJob?.status}" confirmed_tech_id="${techActiveJob?.confirmed_tech_id}" current_tech_id="${techActiveJob?.current_tech_id}" body="${body}"`);
 
       // Tech sent photos — process them
       if (mediaUrls.length > 0) {
@@ -81,20 +83,22 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
-      // Tech has a job awaiting reply — match to the most recently dispatched job for this tech
+      // Tech has a job awaiting reply — match any job assigned to any tech sharing this phone
+      console.log(`[TechHandler] Pending job lookup — techIds: ${JSON.stringify(techIds)}, status: awaiting_tech_reply`);
       const { data: pendingJobs } = await supabase
         .from('jobs').select('id, status, current_tech_id, tech_notified_at')
-        .eq('current_tech_id', tech.id)
+        .in('current_tech_id', techIds)
         .eq('status', 'awaiting_tech_reply')
         .order('tech_notified_at', { ascending: false })
         .limit(1);
       const pendingJob = pendingJobs?.[0] || null;
+      console.log(`[TechHandler] Pending job result: ${pendingJob ? `job ${pendingJob.id} (current_tech_id: ${pendingJob.current_tech_id})` : 'none'}`);
 
       if (pendingJob) {
         if (bodyLower === 'yes' || bodyLower === 'y') {
-          await handleTechReply(pendingJob.id, tech.id, 'yes');
+          await handleTechReply(pendingJob.id, pendingJob.current_tech_id, 'yes');
         } else if (bodyLower === 'no' || bodyLower === 'n') {
-          await handleTechReply(pendingJob.id, tech.id, 'no');
+          await handleTechReply(pendingJob.id, pendingJob.current_tech_id, 'no');
         } else {
           const { sendSMS } = require('./service-sms');
           await sendSMS(from, `Just reply Yes if you're available or No if you're not and we'll get you taken care of!`);
