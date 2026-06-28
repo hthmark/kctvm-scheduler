@@ -87,6 +87,14 @@ async function handleAddOn(jobId, customerPhone, addons) {
     tvUpdates.num_tvs = existingTvCount + addons.tvs.length;
   }
 
+  // Write tv_N_wire = 'cable' for TVs covered by wire concealment add-ons
+  if (addons.wireConceals) {
+    const existingTvCount = job.num_tvs || 1;
+    for (let i = 1; i <= Math.min(addons.wireConceals, existingTvCount); i++) {
+      tvUpdates['tv_' + i + '_wire'] = 'cable';
+    }
+  }
+
   await updateJob(jobId, {
     total_price: newTotal,
     base_payout: newBasePayout,
