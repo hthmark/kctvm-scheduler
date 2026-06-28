@@ -411,9 +411,22 @@ async function handleTechRescheduleRequest(job, techId) {
 
 async function handleTechRescheduleTime(job, techId, timeText) {
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+
+  // Fix 2: reject time ranges before attempting to parse
+  if (/\d+\s*(to|-)\s*\d+/.test(timeText) || /between/i.test(timeText)) {
+    await sendSMS(tech.phone, `Could you give me a specific time rather than a range?`);
+    return;
+  }
+
   const parsed = attemptDateParse(timeText);
-  if (!parsed || parsed <= new Date()) {
+
+  // Fix 1: distinguish past/unparseable from generic failure
+  if (!parsed) {
     await sendSMS(tech.phone, `Sorry, I couldn't understand that time. Can you send a specific day and time like "Friday at 2pm"?`);
+    return;
+  }
+  if (parsed <= new Date()) {
+    await sendSMS(tech.phone, `That time looks like it's already passed — what day and time were you thinking?`);
     return;
   }
   const displayTime = parsed.toLocaleString('en-US', {
