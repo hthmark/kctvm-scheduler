@@ -246,6 +246,19 @@ async function findNextAvailableTime(requestedTime) {
   }
 
   for (let i = 0; i < 20; i++) {
+    // Skip slots outside 7 AM–7 PM Chicago — advance to next morning if needed
+    const slotMins = getChicagoMinutes(candidate);
+    if (slotMins < 7 * 60 || slotMins > 19 * 60) {
+      const nextDay = new Date(candidate);
+      if (slotMins > 19 * 60) nextDay.setDate(nextDay.getDate() + 1);
+      const dateStr = nextDay.toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+      const parts = dateStr.split('/');
+      candidate = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]), 8, 0, 0, 0);
+      const offset = new Date(candidate.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+      candidate = new Date(candidate.getTime() + (candidate - offset));
+      continue;
+    }
+
     try {
       // Check 90-min job window + 30-min buffer after = 120 min total to ensure no back-to-back jobs
       const available = await isTimeAvailable(candidate, 120);
