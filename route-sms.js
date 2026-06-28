@@ -214,6 +214,31 @@ router.post('/inbound', async (req, res) => {
         }
       }
 
+      // Tech replied Done — check before confirmed-job handler so it's not swallowed
+      if (bodyLower === 'done' || bodyLower.startsWith('done')) {
+        console.log(`[SMS Inbound] Tech ${tech.name} replied Done — looking for confirmed job`);
+        const { data: confirmedJobs } = await supabase
+          .from('jobs').select('id, tv_1_photo, photos_received_at')
+          .in('confirmed_tech_id', techIds)
+          .eq('status', 'confirmed')
+          .order('paid_at', { ascending: false })
+          .limit(1);
+        const confirmedJob = confirmedJobs?.[0] || null;
+        if (confirmedJob) {
+          if (!confirmedJob.tv_1_photo && !confirmedJob.photos_received_at) {
+            const { sendSMS } = require('./service-sms');
+            await sendSMS(from, `Don't forget to send your completion photos before we wrap up — we need those on file!`);
+            return;
+          }
+          console.log(`[SMS Inbound] Found confirmed job ${confirmedJob.id} — marking complete`);
+          await handleJobCompletion(confirmedJob.id);
+          const { sendSMS } = require('./service-sms');
+          await sendSMS(from, `Great work! Job marked complete and review request sent to the customer. 🎉`);
+          await sendSMS(from, `Thanks ${tech.name}, great work! We'll be in touch for the next one — payment is on its way to you.`);
+          return;
+        }
+      }
+
       // Tech message on a confirmed/awaiting_payment job — time-first detection
       {
         const { data: activeConfirmedJob } = await supabase
