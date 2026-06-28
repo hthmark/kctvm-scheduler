@@ -99,6 +99,21 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
+      // Tech replying late — job already moved on to another tech
+      if (!pendingJob && (bodyLower === 'yes' || bodyLower === 'y' || bodyLower === 'no' || bodyLower === 'n')) {
+        const { data: movedJob } = await supabase
+          .from('jobs').select('id, current_tech_id')
+          .eq('id', techActiveJob?.id)
+          .neq('current_tech_id', tech.id)
+          .not('status', 'in', '("completed","cancelled")')
+          .single();
+        if (movedJob) {
+          const { sendSMS: sms } = require('./service-sms');
+          await sms(from, `Hey ${tech.name.split(' ')[0]}, thanks for getting back to us — we already routed this one to another tech but we'll keep you in mind for the next one!`);
+          return;
+        }
+      }
+
       // Tech is replying to a reschedule confirmation request
       const { data: reschedulingJob } = await supabase
         .from('jobs').select('*')

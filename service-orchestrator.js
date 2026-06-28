@@ -5,7 +5,7 @@ const { generateTechMessage, analyzeJobPhotos } = require('./service-claude');
 const { createPaymentLink, checkPaymentStatus } = require('./service-stripe');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-const TECH_TIMEOUT_MS = (parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 2) * 60 * 1000; // TEMP: default 2min for testing
+const TECH_TIMEOUT_MS = (parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 1) * 60 * 1000;
 const GOOGLE_REVIEW_URL = 'https://g.page/r/CWmvZghawMfzEBM/review';
 const OWNER_PHONE = process.env.OWNER_PHONE || '+13862287246';
 
