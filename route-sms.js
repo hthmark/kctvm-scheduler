@@ -39,14 +39,15 @@ router.post('/inbound', async (req, res) => {
     console.log('[SMS Inbound] Raw from number:', from, '| Telnyx number:', process.env.TELNYX_PHONE_NUMBER);
     if (from === '+18162032001' || from === process.env.TELNYX_PHONE_NUMBER) return;
     const normalizedFrom = from.replace(/\D/g, '');
+    const e164From = from.startsWith('+1') ? from : `${e164From}`;
     const bodyLower = (body || '').toLowerCase().trim();
     console.log(`[SMS Inbound] From: ${from} | Body: "${body}" | Media: ${mediaUrls.length} files`);
 
     // ── CHECK IF SENDER IS A TECH ────────────────────────────────────────────
     const { data: tech, error: techLookupError } = await supabase
       .from('technicians').select('id, name')
-      .or(`phone.eq.${from},phone.eq.+1${normalizedFrom}`).single();
-    console.log(`[SMS Inbound] Tech lookup for ${from} (normalized: +1${normalizedFrom}) — result: ${tech ? `found: ${tech.name} (${tech.id})` : `not found (${techLookupError?.message || 'no match'})`}`);
+      .or(`phone.eq.${from},phone.eq.${e164From}`).single();
+    console.log(`[SMS Inbound] Tech lookup for ${from} (normalized: ${e164From}) — result: ${tech ? `found: ${tech.name} (${tech.id})` : `not found (${techLookupError?.message || 'no match'})`}`);
 
     if (tech) {
       console.log(`[SMS Inbound] Tech found: ${tech.name}, body: "${bodyLower}", media: ${mediaUrls.length}`);
@@ -282,7 +283,7 @@ router.post('/inbound', async (req, res) => {
     if (body) {
       const { data: techReschedCustJob } = await supabase
         .from('jobs').select('*')
-        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .or(`customer_phone.eq.${from},customer_phone.eq.${e164From}`)
         .eq('status', 'tech_reschedule_customer_confirm')
         .order('created_at', { ascending: false })
         .limit(1)
@@ -301,7 +302,7 @@ router.post('/inbound', async (req, res) => {
     if (body) {
       const { data: techReschedDayJob } = await supabase
         .from('jobs').select('*')
-        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .or(`customer_phone.eq.${from},customer_phone.eq.${e164From}`)
         .eq('status', 'tech_reschedule_day_confirm')
         .order('created_at', { ascending: false })
         .limit(1)
@@ -320,7 +321,7 @@ router.post('/inbound', async (req, res) => {
     if (body) {
       const { data: dayConfirmJob } = await supabase
         .from('jobs').select('*')
-        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .or(`customer_phone.eq.${from},customer_phone.eq.${e164From}`)
         .eq('status', 'rescheduling_day_confirm')
         .order('created_at', { ascending: false })
         .limit(1)
@@ -359,7 +360,7 @@ router.post('/inbound', async (req, res) => {
     if (isRescheduleRequest && body) {
       const { data: activeJob } = await supabase
         .from('jobs').select('*')
-        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .or(`customer_phone.eq.${from},customer_phone.eq.${e164From}`)
         .not('status', 'in', '("completed","cancelled")')
         .order('created_at', { ascending: false })
         .limit(1)
