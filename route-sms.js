@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -108,6 +108,35 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
+      // Tech confirming they want to cancel
+      const { data: cancelConfirmJob } = await supabase
+        .from('jobs').select('*')
+        .eq('confirmed_tech_id', tech.id)
+        .eq('status', 'tech_cancel_confirm')
+        .single();
+
+      if (cancelConfirmJob) {
+        const isYes = bodyLower === 'yes' || bodyLower === 'y';
+        handleTechCancelConfirm(cancelConfirmJob, tech.id, isYes).catch(err =>
+          console.error('[SMS Inbound] TechCancelConfirm error:', err)
+        );
+        return;
+      }
+
+      // Tech providing a new time after requesting reschedule
+      const { data: techReschedJob } = await supabase
+        .from('jobs').select('*')
+        .eq('confirmed_tech_id', tech.id)
+        .eq('status', 'tech_reschedule_pending')
+        .single();
+
+      if (techReschedJob) {
+        handleTechRescheduleTime(techReschedJob, tech.id, body).catch(err =>
+          console.error('[SMS Inbound] TechRescheduleTime error:', err)
+        );
+        return;
+      }
+
       // Late cancellation — tech says No on a job they already accepted
       if ((bodyLower === 'no' || bodyLower === 'n') && !pendingJob && !reschedulingJob) {
         const { data: activeJob } = await supabase
@@ -120,6 +149,35 @@ router.post('/inbound', async (req, res) => {
           handleLateCancellation(activeJob, tech.id).catch(err =>
             console.error('[SMS Inbound] Late cancellation error:', err)
           );
+          return;
+        }
+      }
+
+      // Tech wants to cancel or reschedule a confirmed job
+      const techCancelKeywords = ["can't make it", "cant make it", "have to cancel", "something came up", "cancel"];
+      const techReschedKeywords = ["can we move", "reschedule", "can i do a different time", "running behind", "different time"];
+      const techWantsCancel = techCancelKeywords.some(k => bodyLower.includes(k));
+      const techWantsReschedule = techReschedKeywords.some(k => bodyLower.includes(k));
+
+      if (techWantsCancel || techWantsReschedule) {
+        const { data: activeConfirmedJob } = await supabase
+          .from('jobs').select('*')
+          .eq('confirmed_tech_id', tech.id)
+          .eq('status', 'confirmed')
+          .order('paid_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (activeConfirmedJob) {
+          if (techWantsCancel) {
+            handleTechCancelRequest(activeConfirmedJob, tech.id).catch(err =>
+              console.error('[SMS Inbound] TechCancelRequest error:', err)
+            );
+          } else {
+            handleTechRescheduleRequest(activeConfirmedJob, tech.id).catch(err =>
+              console.error('[SMS Inbound] TechRescheduleRequest error:', err)
+            );
+          }
           return;
         }
       }
@@ -174,6 +232,25 @@ router.post('/inbound', async (req, res) => {
 
       // Tech sent something else — ignore silently
       return;
+    }
+
+    // ── TECH-INITIATED RESCHEDULE — customer confirming proposed time ─────────
+    if (body) {
+      const { data: techReschedCustJob } = await supabase
+        .from('jobs').select('*')
+        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .eq('status', 'tech_reschedule_customer_confirm')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (techReschedCustJob) {
+        console.log(`[SMS Inbound] Tech-reschedule customer reply from ${from} for job ${techReschedCustJob.id}: "${body}"`);
+        handleTechRescheduleCustReply(techReschedCustJob, body).catch(err =>
+          console.error('[SMS Inbound] TechRescheduleCustReply error:', err)
+        );
+        return;
+      }
     }
 
     // ── CHECK FOR RESCHEDULING DAY CONFIRM (customer replying to "11 AM tomorrow?") ─

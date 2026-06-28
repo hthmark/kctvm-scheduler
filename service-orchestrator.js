@@ -371,6 +371,91 @@ function hasDay(text) {
   return /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2})\b/i.test(text);
 }
 
+// ─── TECH-INITIATED CANCEL ────────────────────────────────────────────────────
+async function handleTechCancelRequest(job, techId) {
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+  await updateJob(job.id, { status: 'tech_cancel_confirm' });
+  await sendSMS(tech.phone, `Just confirming — are you cancelling the ${job.city} job on ${formatPreferredTime(job.preferred_time)}? Reply Yes to confirm.`);
+  console.log(`[Orchestrator] Tech ${tech.name} cancel request — awaiting confirmation for job ${job.id}`);
+}
+
+async function handleTechCancelConfirm(job, techId, isYes) {
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+  if (isYes) {
+    if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
+    await updateJob(job.id, {
+      status: 'tech_search',
+      confirmed_tech_id: null,
+      confirmed_tech_name: null,
+      current_tech_id: null,
+      current_tech_name: null,
+      tech_search_index: (job.tech_search_index || 0) + 1,
+    });
+    await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}, we had an unexpected scheduling conflict on our end — we're getting you a new tech and will confirm shortly!`);
+    console.log(`[Orchestrator] Tech ${tech.name} confirmed cancel for job ${job.id} — dispatching next tech`);
+    await dispatchToNextTech(job.id);
+  } else {
+    await updateJob(job.id, { status: 'confirmed' });
+    await sendSMS(tech.phone, `Got it — you're still on for ${formatPreferredTime(job.preferred_time)}. See you then!`);
+    console.log(`[Orchestrator] Tech ${tech.name} did not cancel job ${job.id} — restored to confirmed`);
+  }
+}
+
+// ─── TECH-INITIATED RESCHEDULE ────────────────────────────────────────────────
+async function handleTechRescheduleRequest(job, techId) {
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+  await updateJob(job.id, { status: 'tech_reschedule_pending' });
+  await sendSMS(tech.phone, `What day and time works for you?`);
+  console.log(`[Orchestrator] Tech ${tech.name} wants to reschedule job ${job.id} — asked for new time`);
+}
+
+async function handleTechRescheduleTime(job, techId, timeText) {
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+  const parsed = attemptDateParse(timeText);
+  if (!parsed || parsed <= new Date()) {
+    await sendSMS(tech.phone, `Sorry, I couldn't understand that time. Can you send a specific day and time like "Friday at 2pm"?`);
+    return;
+  }
+  const displayTime = parsed.toLocaleString('en-US', {
+    timeZone: 'America/Chicago', weekday: 'short', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  });
+  await updateJob(job.id, { status: 'tech_reschedule_customer_confirm', rescheduling_new_time: parsed.toISOString() });
+  await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}, our tech is running a little behind from another job — would ${displayTime} still work for you?`);
+  console.log(`[Orchestrator] Tech ${tech ? tech.name : techId} proposed ${displayTime} to customer for job ${job.id}`);
+}
+
+async function handleTechRescheduleCustReply(job, messageText) {
+  const { data: tech } = job.confirmed_tech_id
+    ? await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single()
+    : { data: null };
+  const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|sounds good|perfect|great|absolutely|definitely|correct|confirmed|confirm|go ahead|sounds great|works for me|good|all good)$/i.test(messageText.toLowerCase().trim());
+
+  if (isAffirmative) {
+    const newDate = new Date(job.rescheduling_new_time);
+    const displayTime = formatPreferredTime(job.rescheduling_new_time);
+    if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
+    const newEventId = await createJobEvent(job, newDate);
+    if (tech) await confirmJobEvent(newEventId, tech.name);
+    await updateJob(job.id, {
+      status: 'confirmed',
+      preferred_time: job.rescheduling_new_time,
+      scheduled_time: newDate.toISOString(),
+      calendar_event_id: newEventId,
+      rescheduling_new_time: null,
+    });
+    await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]} — see you at ${displayTime}!`);
+    if (tech) await sendSMS(tech.phone, `Customer confirmed ${displayTime} — you're all set ${tech.name.split(' ')[0]}!`);
+    console.log(`[Orchestrator] Customer confirmed tech reschedule for job ${job.id} → ${displayTime}`);
+  } else {
+    // Customer said no — ask what time works, put job back to confirmed so their next reply hits normal reschedule detection
+    await updateJob(job.id, { status: 'confirmed', rescheduling_new_time: null });
+    await sendSMS(job.customer_phone, `No problem — what day and time works better for you?`);
+    if (tech) await sendSMS(tech.phone, `The customer can't do that time — we'll work out a new time with them and let you know.`);
+    console.log(`[Orchestrator] Customer rejected tech reschedule for job ${job.id} — routing back to normal flow`);
+  }
+}
+
 async function handleLateCancellation(job, techId) {
   const firstName = job.customer_name.split(' ')[0];
   if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
@@ -596,4 +681,4 @@ async function handleRescheduleReply(job, techId, reply) {
   }
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply };
