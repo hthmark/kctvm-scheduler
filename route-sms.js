@@ -252,6 +252,7 @@ router.post('/inbound', async (req, res) => {
           await handleJobCompletion(confirmedJob.id);
           const { sendSMS } = require('./service-sms');
           await sendSMS(from, `Great work! Job marked complete and review request sent to the customer. 🎉`);
+          await sendSMS(from, `Thanks ${tech.name}, great work! We'll be in touch for the next one — payment is on its way to you.`);
           return;
         }
       }
@@ -305,6 +306,7 @@ router.post('/inbound', async (req, res) => {
             await handleJobCompletion(fallbackJob.id);
             const { sendSMS } = require('./service-sms');
             await sendSMS(from, `Great work! Job marked complete and review request sent to the customer. 🎉`);
+            await sendSMS(from, `Thanks ${tech.name}, great work! We'll be in touch for the next one — payment is on its way to you.`);
           }
         } else if (isCancelIntent) {
           console.log(`[SMS Inbound] Fallback: cancellation intent from tech ${tech.name} on job ${fallbackJob.id}`);
