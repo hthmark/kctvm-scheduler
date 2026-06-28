@@ -68,17 +68,23 @@ router.post('/inbound', async (req, res) => {
       // Tech sent photos — process them
       if (mediaUrls.length > 0) {
         const { data: confirmedJobs } = await supabase
-          .from('jobs').select('id, num_tvs')
-          .eq('confirmed_tech_id', tech.id)
+          .from('jobs').select('id, num_tvs, confirmed_tech_id')
+          .in('confirmed_tech_id', techIds)
           .eq('status', 'confirmed')
           .order('paid_at', { ascending: false })
           .limit(1);
         const job = confirmedJobs?.[0];
         if (job) {
           console.log(`[SMS Inbound] Processing ${mediaUrls.length} photos for job ${job.id}`);
-          handleTechPhotos(job.id, tech.id, mediaUrls).catch(err =>
-            console.error('[SMS Inbound] Photo processing error:', err)
-          );
+          try {
+            await handleTechPhotos(job.id, job.confirmed_tech_id, mediaUrls);
+            console.log(`[SMS Inbound] Photos processed for job ${job.id} — completing job`);
+            await handleJobCompletion(job.id);
+            const { sendSMS } = require('./service-sms');
+            await sendSMS(from, `Thanks ${tech.name}, great work! We'll be in touch for the next one — payment is on its way to you.`);
+          } catch (err) {
+            console.error('[SMS Inbound] Photo processing error:', err);
+          }
         }
         return;
       }
