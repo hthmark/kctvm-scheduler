@@ -18,9 +18,22 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), require('
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use(express.static('public'));
+
 app.use('/webhook', require('./route-webhook'));
 app.use('/sms', require('./route-sms'));
 app.use('/jobs', require('./route-jobs'));
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+app.post('/admin/send-sms', async (req, res) => {
+  const { to, message } = req.body;
+  if (!to || !message) return res.status(400).json({ error: 'to and message are required' });
+  const { sendSMS } = require('./service-sms');
+  const result = await sendSMS(to, message);
+  if (result.success === false && !result.blocked) return res.status(500).json({ error: result.error || 'Send failed' });
+  res.json({ ok: true });
+});
 
 console.log('[Server] All routes loaded successfully');
 
