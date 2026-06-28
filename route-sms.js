@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechConfirmedMessage } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -163,13 +163,8 @@ router.post('/inbound', async (req, res) => {
         }
       }
 
-      // Tech wants to cancel or reschedule a confirmed job
-      const techCancelKeywords = ["can't make it", "cant make it", "have to cancel", "something came up", "cancel", "won't be able", "wont be able"];
-      const techReschedKeywords = ["can we move", "reschedule", "can i do a different time", "running behind", "different time", "can i do", "can we make it", "what about", "can we do", "would it work", "is there any way"];
-      const techWantsCancel = techCancelKeywords.some(k => bodyLower.includes(k));
-      const techWantsReschedule = techReschedKeywords.some(k => bodyLower.includes(k));
-
-      if (techWantsCancel || techWantsReschedule) {
+      // Tech message on a confirmed/awaiting_payment job — time-first detection
+      {
         const { data: activeConfirmedJob } = await supabase
           .from('jobs').select('*')
           .eq('confirmed_tech_id', tech.id)
@@ -179,15 +174,9 @@ router.post('/inbound', async (req, res) => {
           .single();
 
         if (activeConfirmedJob) {
-          if (techWantsCancel) {
-            handleTechCancelRequest(activeConfirmedJob, tech.id).catch(err =>
-              console.error('[SMS Inbound] TechCancelRequest error:', err)
-            );
-          } else {
-            handleTechRescheduleRequest(activeConfirmedJob, tech.id).catch(err =>
-              console.error('[SMS Inbound] TechRescheduleRequest error:', err)
-            );
-          }
+          handleTechConfirmedMessage(activeConfirmedJob, tech.id, body, bodyLower).catch(err =>
+            console.error('[SMS Inbound] TechConfirmedMessage error:', err)
+          );
           return;
         }
       }

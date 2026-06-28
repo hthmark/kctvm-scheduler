@@ -371,6 +371,47 @@ function hasDay(text) {
   return /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2})\b/i.test(text);
 }
 
+// ─── TECH MESSAGE ON CONFIRMED JOB ───────────────────────────────────────────
+async function handleTechConfirmedMessage(job, techId, body, bodyLower) {
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+
+  // Time-first: if tech message contains a parseable future time different from scheduled_time, treat as reschedule
+  const isTimeRange = /\d+\s*(to|-)\s*\d+/.test(body) || /between/i.test(body);
+  if (!isTimeRange) {
+    const parsed = attemptDateParse(body);
+    if (parsed && parsed > new Date()) {
+      const scheduledMs = job.scheduled_time ? new Date(job.scheduled_time).getTime() : 0;
+      if (Math.abs(parsed.getTime() - scheduledMs) > 5 * 60 * 1000) {
+        // Treat as reschedule — skip "what time?" and go straight to customer confirm
+        const displayTime = parsed.toLocaleString('en-US', {
+          timeZone: 'America/Chicago', weekday: 'short', month: 'numeric', day: 'numeric',
+          hour: 'numeric', minute: '2-digit', hour12: true
+        });
+        await updateJob(job.id, { status: 'tech_reschedule_customer_confirm', rescheduling_new_time: parsed.toISOString() });
+        await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}, our tech had something come up — would ${displayTime} still work for you?`);
+        console.log(`[Orchestrator] Tech ${tech.name} implied reschedule to ${displayTime} for job ${job.id} — asked customer`);
+        return;
+      }
+    }
+  }
+
+  // Cancel keyword check
+  const techCancelKeywords = ["can't make it", "cant make it", "have to cancel", "something came up", "cancel", "won't be able", "wont be able"];
+  if (techCancelKeywords.some(k => bodyLower.includes(k))) {
+    await handleTechCancelRequest(job, techId);
+    return;
+  }
+
+  // Reschedule keyword check — no parseable time, so ask for one
+  const techReschedKeywords = ["can we move", "reschedule", "can i do a different time", "running behind", "different time", "can i do", "can we make it", "what about", "can we do", "would it work", "is there any way"];
+  if (techReschedKeywords.some(k => bodyLower.includes(k))) {
+    await handleTechRescheduleRequest(job, techId);
+    return;
+  }
+
+  console.log(`[Orchestrator] Tech ${tech.name} message on confirmed job ${job.id} — no action matched, ignoring`);
+}
+
 // ─── TECH-INITIATED CANCEL ────────────────────────────────────────────────────
 async function handleTechCancelRequest(job, techId) {
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
@@ -694,4 +735,4 @@ async function handleRescheduleReply(job, techId, reply) {
   }
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechConfirmedMessage };
