@@ -184,12 +184,19 @@ async function checkTechTimeouts() {
   console.log('[TechTimeout] Checking for timed-out awaiting_tech_reply jobs');
   const timeoutMinutes = parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 1;
   const cutoff = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
+  console.log(`[TechTimeout] cutoff=${cutoff} (timeout=${timeoutMinutes}min)`);
+
+  // Debug: show all awaiting_tech_reply jobs and their tech_notified_at values
+  const { data: allWaiting } = await supabase.from('jobs').select('id,status,tech_notified_at').eq('status', 'awaiting_tech_reply');
+  console.log('[TechTimeout] All awaiting_tech_reply jobs:', JSON.stringify(allWaiting));
+
   const { data: jobs, error } = await supabase
     .from('jobs')
     .select('*')
     .eq('status', 'awaiting_tech_reply')
     .lt('tech_notified_at', cutoff);
   if (error) { console.error('[TechTimeout] Query error:', error.message); return; }
+  console.log(`[TechTimeout] Raw query result: ${JSON.stringify(jobs)}`);
   console.log(`[TechTimeout] Found ${(jobs || []).length} timed-out job(s)`);
   if (!jobs || jobs.length === 0) return;
   for (const job of jobs) {
