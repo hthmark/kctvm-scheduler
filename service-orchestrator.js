@@ -133,7 +133,7 @@ async function dispatchToNextTech(jobId) {
   if (index >= techs.length) {
     await updateJob(jobId, { status: 'no_tech_available' });
     if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
-    await sendSMS(job.customer_phone, `Hi ${job.customer_name.split(' ')[0]}, unfortunately we don't have a technician available for your requested time. Can we schedule a different time?`);
+    await sendSMS('+13862287246', `⚠️ Manual intervention needed — no techs available for ${job.customer_name} in ${job.city} on ${job.preferred_time}. Job ID: ${job.id}. Customer: ${job.customer_phone}. Total: $${job.total_price}.`);
     return;
   }
   const tech = techs[index];
