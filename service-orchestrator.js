@@ -465,7 +465,7 @@ async function handleTechConfirmedMessage(job, techId, body, bodyLower) {
           const dayLabel = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'long' });
           const timeLabel = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true });
           await updateJob(job.id, { status: 'tech_reschedule_day_confirm', rescheduling_new_time: parsed.toISOString() });
-          await sendSMS(tech.phone, `Got it — just to confirm, are you thinking ${timeLabel} this ${dayLabel}?`);
+          await sendSMS(tech.phone, `Got it — just to confirm, are you thinking ${timeLabel} this ${dayLabel}?\n\nReply Yes or No`);
           console.log(`[Orchestrator] Tech ${tech.name} implied reschedule (no day) to ${displayTime} for job ${job.id} — asking tech day confirm`);
         }
         return;
@@ -600,7 +600,7 @@ async function handleTechRescheduleCustReply(job, messageText) {
         const dayLabel = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'long' });
         const timeLabel = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true });
         await updateJob(job.id, { status: 'tech_reschedule_day_confirm', rescheduling_new_time: parsed.toISOString() });
-        await sendSMS(job.customer_phone, `Got it — just to confirm, are you thinking ${timeLabel} this ${dayLabel}?`);
+        await sendSMS(job.customer_phone, `Got it — just to confirm, are you thinking ${timeLabel} this ${dayLabel}?\n\nReply Yes or No`);
         console.log(`[Orchestrator] Customer countered with time-only "${messageText}" for job ${job.id} — asking day confirm`);
       }
     } else {
@@ -735,7 +735,7 @@ async function handleRescheduleRequest(job, messageText) {
       throw dbErr;
     }
 
-    await sendSMS(job.customer_phone, `${confirmLabel}? Does that work for you?`);
+    await sendSMS(job.customer_phone, `${confirmLabel}? Does that work for you?\n\nReply Yes or No`);
     console.log(`[Reschedule] Confirmation sent to customer for job ${job.id}: "${confirmLabel}"`);
   } catch (err) {
     console.error(`[Reschedule] handleRescheduleRequest ERROR for job ${job.id}:`, err.message, err.stack);
