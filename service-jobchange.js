@@ -114,7 +114,11 @@ async function handleAddOn(jobId, customerPhone, addons) {
     });
     const link = await stripe.paymentLinks.create({
       line_items: [{ price: stripePrice.id, quantity: 1 }],
-      metadata: { job_id: jobId, updated: 'true' }
+      metadata: { job_id: jobId, updated: 'true' },
+      billing_address_collection: 'required',
+      shipping_address_collection: {
+        allowed_countries: ['US'],
+      },
     });
     paymentUrl = link.url;
 

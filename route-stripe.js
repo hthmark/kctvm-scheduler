@@ -24,10 +24,17 @@ async function webhookHandler(req, res) {
     if (session.payment_status === 'paid') {
       const jobId = session.metadata?.job_id;
       if (!jobId) return;
-      const address = session.custom_fields?.find(f => f.key === 'full_address')?.text?.value || null;
+      const shippingAddr = session.shipping_details?.address || session.customer_details?.address || null;
+      const addressStr = shippingAddr
+        ? [shippingAddr.line1, shippingAddr.line2, shippingAddr.city, shippingAddr.state, shippingAddr.postal_code].filter(Boolean).join(', ')
+        : null;
+      console.log(`[Stripe] Address collected: ${addressStr}`);
+      if (addressStr) {
+        await supabase.from('jobs').update({ customer_address: addressStr }).eq('id', jobId);
+      }
       const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
       if (job && job.status === 'awaiting_payment') {
-        await handlePaymentComplete(job, address).catch(err =>
+        await handlePaymentComplete(job, addressStr).catch(err =>
           console.error('[Stripe] handlePaymentComplete error:', err)
         );
       }

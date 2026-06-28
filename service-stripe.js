@@ -16,6 +16,10 @@ async function createPaymentLink(job) {
   const paymentLink = await stripe.paymentLinks.create({
     line_items: [{ price: price.id, quantity: 1 }],
     metadata: { job_id: job.id },
+    billing_address_collection: 'required',
+    shipping_address_collection: {
+      allowed_countries: ['US'],
+    },
     after_completion: {
       type: 'redirect',
       redirect: { url: `${process.env.BASE_URL}/payment-success?job_id=${job.id}` },
