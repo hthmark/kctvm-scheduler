@@ -174,6 +174,56 @@ async function handleTechReply(jobId, techId, reply) {
 async function techAccepted(job, techId) {
   const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
   if (job.calendar_event_id) await confirmJobEvent(job.calendar_event_id, tech.name);
+
+  // Customer already paid — skip Stripe, reassign directly and brief the new tech
+  if (job.paid_at) {
+    await updateJob(job.id, { status: 'confirmed', confirmed_tech_id: techId, confirmed_tech_name: tech.name });
+    const displayTime = formatPreferredTime(job.preferred_time);
+    await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}, just a heads up — we've reassigned your installation. ${tech.name.split(' ')[0]} will be taking care of you on ${displayTime}. You're all set — no further action needed!`);
+
+    // Re-fetch to get current address and TV fields
+    const { data: freshJob } = await supabase.from('jobs').select('*').eq('id', job.id).single();
+    const j = freshJob || job;
+    const { mountItems, wireItems, brickTVs } = buildSupplyList(j);
+    const tvLines = [];
+    for (let i = 1; i <= 10; i++) {
+      const size = j[`tv_${i}_size`];
+      if (!size || size === 'null') continue;
+      const inches = j[`tv_${i}_inches`];
+      const sizeLabel = inches ? `${inches}"` : (size === 'small' ? 'under 65"' : '65"+');
+      const mount = j[`tv_${i}_mount`];
+      const mountLabel = mount === 'yes' ? 'has mount' : mount === 'fixed' ? 'fixed mount needed' : mount === 'articulating' ? 'articulating mount needed' : mount;
+      const wallLabel = j[`tv_${i}_wall`] === 'brick' ? 'BRICK WALL' : 'drywall';
+      const wireLabel = j[`tv_${i}_wire`] === 'cable' ? 'wire concealment' : 'no wire concealment';
+      tvLines.push(`TV${i}: ${sizeLabel}, ${mountLabel}, ${wallLabel}, ${wireLabel}`);
+    }
+    let supplySection = '';
+    if (mountItems.length > 0) {
+      supplySection += `\n\n🛒 MOUNTS — pick up from Walmart:`;
+      mountItems.forEach(m => { supplySection += `\nTV${m.tvNum} (${m.inches || m.size}") — ${m.label}: ${m.url}`; });
+    }
+    if (wireItems.length > 0) {
+      supplySection += `\n\n🛒 WIRE CONCEAL SUPPLIES (${wireItems.length}x each) — Home Depot:`;
+      WIRE_CONCEAL_LINKS.forEach(item => { supplySection += `\n${item.label}: ${item.url}`; });
+    }
+    if (brickTVs.length > 0) {
+      const brickNums = brickTVs.map(t => `TV${t.tvNum}`).join(', ');
+      supplySection += `\n\n🧱 BRICK — ${brickNums}: Bring masonry drill bits + anchors!`;
+    }
+    const basePayout = parseFloat(j.base_payout) || calculateBasePayout(j);
+    const techMsg = `Job confirmed & paid!\n${j.customer_name} — ${j.customer_address}\nTime: ${displayTime}\n\n${tvLines.join('\n')}${supplySection}\n\nBase payout: $${basePayout}\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
+    if (techMsg.length > 1580) {
+      const part1 = `Job confirmed & paid!\n${j.customer_name} — ${j.customer_address}\nTime: ${displayTime}\n\n${tvLines.join('\n')}\n\nBase payout: $${basePayout}`;
+      const part2 = supplySection.trim() + `\n\nSend photos + receipts via MMS and reply "Done" when finished. Thanks ${tech.name.split(' ')[0]}!`;
+      await sendSMS(tech.phone, part1);
+      await sendSMS(tech.phone, part2);
+    } else {
+      await sendSMS(tech.phone, techMsg);
+    }
+    console.log(`[Orchestrator] Job ${job.id} reassigned to tech ${techId} (already paid) → confirmed`);
+    return;
+  }
+
   const paymentUrl = await createPaymentLink(job);
   await updateJob(job.id, { status: 'awaiting_payment', confirmed_tech_id: techId, confirmed_tech_name: tech.name, stripe_payment_link: paymentUrl, payment_link_sent_at: new Date().toISOString() });
   const displayTime = formatPreferredTime(job.preferred_time);
