@@ -228,15 +228,24 @@ router.post('/inbound', async (req, res) => {
         if (confirmedJob) {
           console.log(`[SMS Inbound] Matched job ${confirmedJob.id} confirmed_tech_id=${confirmedJob.confirmed_tech_id} tv_1_photo=${confirmedJob.tv_1_photo} photos_received_at=${confirmedJob.photos_received_at}`);
           if (!confirmedJob.tv_1_photo && !confirmedJob.photos_received_at) {
+            console.log(`[SMS Inbound] No photos on job ${confirmedJob.id} — sending photo reminder, NOT completing`);
             const { sendSMS } = require('./service-sms');
             await sendSMS(from, `Don't forget to send your completion photos before we wrap up — we need those on file!`);
             return;
           }
-          console.log(`[SMS Inbound] Found confirmed job ${confirmedJob.id} — marking complete`);
-          await handleJobCompletion(confirmedJob.id);
+          console.log(`[SMS Inbound] Photos present — calling handleJobCompletion for job ${confirmedJob.id}`);
+          try {
+            await handleJobCompletion(confirmedJob.id);
+            console.log(`[SMS Inbound] handleJobCompletion returned OK for job ${confirmedJob.id}`);
+          } catch (err) {
+            console.error(`[SMS Inbound] handleJobCompletion threw for job ${confirmedJob.id}:`, err.message, err.stack);
+          }
           const { sendSMS } = require('./service-sms');
+          console.log(`[SMS Inbound] Sending 🎉 confirmation to tech ${from}`);
           await sendSMS(from, `Great work! Job marked complete and review request sent to the customer. 🎉`);
+          console.log(`[SMS Inbound] Sending closing message to tech ${from}`);
           await sendSMS(from, `Thanks ${tech.name}, great work! We'll be in touch for the next one — payment is on its way to you.`);
+          console.log(`[SMS Inbound] Done handler complete for job ${confirmedJob.id}`);
           return;
         }
       }

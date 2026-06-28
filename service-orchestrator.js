@@ -380,16 +380,23 @@ async function handleTechPhotos(jobId, techId, mediaUrls) {
 }
 
 async function handleJobCompletion(jobId) {
+  console.log(`[JobCompletion] START jobId=${jobId}`);
   const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
+  console.log(`[JobCompletion] Job fetched: status=${job?.status} confirmed_tech_id=${job?.confirmed_tech_id} customer_phone=${job?.customer_phone}`);
   await updateJob(jobId, { status: 'completed', completed_at: new Date().toISOString() });
+  console.log(`[JobCompletion] Status updated to completed`);
   // Thank the tech
   if (job.confirmed_tech_id) {
     const { data: tech } = await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single();
+    console.log(`[JobCompletion] Tech lookup for ${job.confirmed_tech_id}: ${tech ? tech.name + ' phone=' + tech.phone : 'not found'}`);
     if (tech) {
+      console.log(`[JobCompletion] Sending payout SMS to tech ${tech.phone}`);
       await sendSMS(tech.phone, `Thanks for the help ${tech.name.split(' ')[0]}! Sending the payout your way.`);
+      console.log(`[JobCompletion] Payout SMS sent`);
     }
   }
   // Send review request to customer
+  console.log(`[JobCompletion] Sending review request to customer ${job.customer_phone}`);
   await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}! Hope the install went smoothly — we'd love to hear how everything went! If you have a moment, a quick Google review would mean the world to us: ${GOOGLE_REVIEW_URL}`);
   console.log(`[Orchestrator] Job ${jobId} completed — tech thanked, review request sent to customer`);
 }
