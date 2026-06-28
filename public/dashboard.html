@@ -1,201 +1,783 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KCTVM Scheduler Dashboard</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KCTVM Ops</title>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
-    header { background: #1a1a2e; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
-    header h1 { font-size: 1.2rem; font-weight: 600; }
-    .badge { background: #e94560; color: white; border-radius: 12px; padding: 2px 8px; font-size: 0.75rem; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
-    .stat-card { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    .stat-card .label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: .5px; }
-    .stat-card .value { font-size: 1.8rem; font-weight: 700; margin-top: 4px; }
-    .stat-card .value.green { color: #16a34a; }
-    .stat-card .value.blue { color: #2563eb; }
-    .stat-card .value.amber { color: #d97706; }
-    .stat-card .value.red { color: #dc2626; }
-    .section { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 24px; overflow: hidden; }
-    .section-header { padding: 14px 20px; border-bottom: 1px solid #f0f0f0; font-weight: 600; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; }
-    .refresh-btn { background: #e0e7ff; color: #3730a3; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; }
-    .refresh-btn:hover { background: #c7d2fe; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    th { background: #fafafa; padding: 10px 16px; text-align: left; font-weight: 600; color: #555; font-size: 0.78rem; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid #eee; }
-    td { padding: 10px 16px; border-bottom: 1px solid #f5f5f5; vertical-align: top; }
-    tr:last-child td { border-bottom: none; }
-    tr:hover td { background: #fafafa; }
-    .status-pill { display: inline-block; border-radius: 12px; padding: 2px 10px; font-size: 0.75rem; font-weight: 500; white-space: nowrap; }
-    .pill-confirmed { background: #dcfce7; color: #16a34a; }
-    .pill-awaiting_tech_reply { background: #fef3c7; color: #b45309; }
-    .pill-awaiting_payment { background: #dbeafe; color: #1d4ed8; }
-    .pill-completed { background: #f0fdf4; color: #166534; }
-    .pill-cancelled { background: #fee2e2; color: #991b1b; }
-    .pill-no_tech_available { background: #fce7f3; color: #9d174d; }
-    .pill-default { background: #f3f4f6; color: #374151; }
-    .sms-form { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
-    .sms-form input, .sms-form textarea { border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; font-size: 0.9rem; width: 100%; font-family: inherit; }
-    .sms-form textarea { resize: vertical; min-height: 80px; }
-    .send-btn { background: #1a1a2e; color: white; border: none; border-radius: 6px; padding: 10px 20px; font-size: 0.9rem; cursor: pointer; align-self: flex-start; }
-    .send-btn:hover { background: #2d2d4e; }
-    .send-btn:disabled { opacity: .5; cursor: default; }
-    .result-msg { font-size: 0.85rem; padding: 8px 12px; border-radius: 6px; }
-    .result-ok { background: #dcfce7; color: #166534; }
-    .result-err { background: #fee2e2; color: #991b1b; }
-    .empty { padding: 32px; text-align: center; color: #aaa; font-size: 0.9rem; }
-    .last-updated { font-size: 0.75rem; color: #aaa; }
-  </style>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { background: #0B0E17; }</style>
 </head>
 <body>
-<div id="root"></div>
-<script>
-const { createElement: h, useState, useEffect, useCallback } = React;
+  <div id="root"></div>
+  <script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
 
-const STATUS_PILLS = {
-  confirmed: 'pill-confirmed',
-  awaiting_tech_reply: 'pill-awaiting_tech_reply',
-  awaiting_payment: 'pill-awaiting_payment',
-  completed: 'pill-completed',
-  cancelled: 'pill-cancelled',
-  no_tech_available: 'pill-no_tech_available',
+const SUPABASE_URL = "https://mznyxaowgwcfiylukayw.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16bnl4YW93Z3djaWl5bHVrYXl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ3NTY0MTUsImV4cCI6MjA2MDMzMjQxNX0.lkIObQxYN5EDHeGpYc8YZR0FJtQ0O2UKqAz2I4Okvto";
+const RAILWAY_URL = "https://trustworthy-eagerness-production-f57c.up.railway.app";
+
+const STATUS_CONFIG = {
+  new: { label: "New", color: "#6B7280", bg: "#1F2937" },
+  scheduling: { label: "Scheduling", color: "#818CF8", bg: "#1E1B4B" },
+  awaiting_time_confirm: { label: "Awaiting Time", color: "#A78BFA", bg: "#2E1065" },
+  scheduling_conflict: { label: "Conflict", color: "#FB923C", bg: "#431407" },
+  tech_search: { label: "Finding Tech", color: "#F5A623", bg: "#2D1B00" },
+  awaiting_tech_reply: { label: "Awaiting Tech", color: "#FBBF24", bg: "#292524" },
+  awaiting_payment: { label: "Awaiting Payment", color: "#34D399", bg: "#022C22" },
+  confirmed: { label: "Confirmed ✓", color: "#10B981", bg: "#064E3B" },
+  tech_cancel_confirm: { label: "Tech Cancelling", color: "#F97316", bg: "#431407" },
+  tech_reschedule_day_confirm: { label: "Tech Rescheduling", color: "#FB923C", bg: "#431407" },
+  rescheduling_day_confirm: { label: "Cust. Rescheduling", color: "#60A5FA", bg: "#1E3A5F" },
+  no_tech_available: { label: "⚠ No Tech", color: "#EF4444", bg: "#450A0A" },
+  completed: { label: "Completed ✓", color: "#4ADE80", bg: "#052E16" },
+  cancelled: { label: "Cancelled", color: "#9CA3AF", bg: "#1F2937" },
 };
 
-function StatusPill({ status }) {
-  const cls = STATUS_PILLS[status] || 'pill-default';
-  return h('span', { className: `status-pill ${cls}` }, status.replace(/_/g, ' '));
+const ACTIVE_STATUSES = ["new","scheduling","awaiting_time_confirm","scheduling_conflict","tech_search","awaiting_tech_reply","awaiting_payment","confirmed","tech_cancel_confirm","tech_reschedule_day_confirm","rescheduling_day_confirm","no_tech_available"];
+
+// ── Supabase helpers ──────────────────────────────────────────────────────────
+async function sbFetch(path, opts = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...(opts.headers || {}),
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+const sbGet = (table, qs = "") => sbFetch(`${table}?${qs}`);
+const sbPatch = (table, id, body) => sbFetch(`${table}?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(body) });
+const sbPost = (table, body) => sbFetch(table, { method: "POST", body: JSON.stringify(body) });
+const sbDelete = (table, id) => sbFetch(`${table}?id=eq.${id}`, { method: "DELETE" });
+
+// ── Tiny UI atoms ─────────────────────────────────────────────────────────────
+const C = {
+  bg: "#0B0E17", card: "#131720", border: "#1E2536",
+  amber: "#F5A623", green: "#10B981", red: "#EF4444",
+  muted: "#4B5563", text: "#E5E7EB", sub: "#9CA3AF",
+};
+
+function Chip({ status }) {
+  const cfg = STATUS_CONFIG[status] || { label: status, color: C.muted, bg: C.card };
+  return <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}33`, borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{cfg.label}</span>;
 }
 
-function StatCard({ label, value, color }) {
-  return h('div', { className: 'stat-card' },
-    h('div', { className: 'label' }, label),
-    h('div', { className: `value ${color || ''}` }, value)
+function Dot({ ok, label }) {
+  const color = ok === null ? C.muted : ok ? C.green : C.red;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
+      <div style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: ok ? `0 0 5px ${color}` : "none" }} />
+      <span style={{ color }}>{label}</span>
+    </div>
   );
 }
 
-function JobsTable({ jobs }) {
-  if (!jobs.length) return h('div', { className: 'empty' }, 'No jobs found');
-  return h('table', null,
-    h('thead', null,
-      h('tr', null,
-        h('th', null, 'Customer'),
-        h('th', null, 'City'),
-        h('th', null, 'Time'),
-        h('th', null, 'Status'),
-        h('th', null, 'Tech'),
-        h('th', null, 'Total'),
-        h('th', null, 'Created'),
-      )
-    ),
-    h('tbody', null,
-      jobs.map(j => h('tr', { key: j.id },
-        h('td', null, j.customer_name || '—'),
-        h('td', null, j.city || '—'),
-        h('td', null, j.preferred_time ? new Date(j.preferred_time).toLocaleString() : '—'),
-        h('td', null, h(StatusPill, { status: j.status })),
-        h('td', null, j.confirmed_tech_name || j.current_tech_name || '—'),
-        h('td', null, j.total_price ? `$${j.total_price}` : '—'),
-        h('td', null, j.created_at ? new Date(j.created_at).toLocaleDateString() : '—'),
-      ))
-    )
+function Btn({ children, onClick, variant = "ghost", disabled, style: s = {} }) {
+  const styles = {
+    primary: { background: C.amber, color: "#0B0E17", border: "none" },
+    danger: { background: "#450A0A", color: C.red, border: `1px solid ${C.red}55` },
+    success: { background: "#052E16", color: C.green, border: `1px solid ${C.green}55` },
+    ghost: { background: C.card, color: C.sub, border: `1px solid ${C.border}` },
+  };
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      ...styles[variant], borderRadius: 6, padding: "6px 12px", fontSize: 12,
+      fontWeight: 600, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
+      fontFamily: "inherit", transition: "opacity 0.15s", ...s,
+    }}>{children}</button>
   );
 }
 
-function SendSMSPanel() {
-  const [to, setTo] = useState('');
-  const [message, setMessage] = useState('');
+function Field({ label, value, mono }) {
+  if (!value && value !== 0) return null;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6, gap: 8 }}>
+      <span style={{ color: C.muted, fontSize: 12, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: C.text, fontSize: 12, fontFamily: mono ? "monospace" : "inherit", textAlign: "right", wordBreak: "break-all" }}>{value}</span>
+    </div>
+  );
+}
+
+function Section({ title, children, accent }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ color: accent || C.amber, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, paddingBottom: 5, borderBottom: `1px solid ${C.border}` }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function Input({ label, value, onChange, type = "text", placeholder, small }) {
+  return (
+    <div style={{ marginBottom: small ? 6 : 10 }}>
+      {label && <label style={{ color: C.muted, fontSize: 11, display: "block", marginBottom: 3 }}>{label}</label>}
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        style={{ width: "100%", background: "#0B0E17", border: `1px solid ${C.border}`, borderRadius: 6, padding: small ? "5px 8px" : "7px 10px", color: C.text, fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "inherit" }} />
+    </div>
+  );
+}
+
+function Select({ label, value, onChange, options }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      {label && <label style={{ color: C.muted, fontSize: 11, display: "block", marginBottom: 3 }}>{label}</label>}
+      <select value={value} onChange={e => onChange(e.target.value)}
+        style={{ width: "100%", background: "#0B0E17", border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 10px", color: C.text, fontSize: 12, outline: "none", fontFamily: "inherit" }}>
+        {options.map(o => <option key={o.value || o} value={o.value || o}>{o.label || o}</option>)}
+      </select>
+    </div>
+  );
+}
+
+// ── SMS Thread ────────────────────────────────────────────────────────────────
+function SmsThread({ phone, onSend }) {
+  const [msgs, setMsgs] = useState([]);
+  const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [result, setResult] = useState(null);
-
-  async function handleSend() {
-    if (!to || !message) return;
-    setSending(true);
-    setResult(null);
-    try {
-      const resp = await fetch('/admin/send-sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, message }),
-      });
-      const data = await resp.json();
-      setResult(resp.ok ? { ok: true, text: 'Sent!' } : { ok: false, text: data.error || 'Failed' });
-      if (resp.ok) { setTo(''); setMessage(''); }
-    } catch (e) {
-      setResult({ ok: false, text: e.message });
-    }
-    setSending(false);
-  }
-
-  return h('div', { className: 'sms-form' },
-    h('input', { type: 'tel', placeholder: '+1XXXXXXXXXX', value: to, onChange: e => setTo(e.target.value) }),
-    h('textarea', { placeholder: 'Message…', value: message, onChange: e => setMessage(e.target.value) }),
-    h('button', { className: 'send-btn', onClick: handleSend, disabled: sending || !to || !message },
-      sending ? 'Sending…' : 'Send SMS'),
-    result && h('div', { className: `result-msg ${result.ok ? 'result-ok' : 'result-err'}` }, result.text)
-  );
-}
-
-function Dashboard() {
-  const [stats, setStats] = useState(null);
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const bottomRef = useRef();
 
   const load = useCallback(async () => {
+    if (!phone) return;
     try {
-      const [sRes, jRes] = await Promise.all([
-        fetch('/jobs/stats/summary'),
-        fetch('/jobs?limit=50'),
-      ]);
-      setStats(await sRes.json());
-      setJobs(await jRes.json());
-      setLastUpdated(new Date().toLocaleTimeString());
-    } catch (e) { console.error(e); }
-    setLoading(false);
-  }, []);
+      const data = await sbGet("sms_conversations", `phone=eq.${encodeURIComponent(phone)}&order=created_at.asc`);
+      setMsgs(Array.isArray(data) ? data : []);
+    } catch {}
+  }, [phone]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-  return h('div', null,
-    h('header', null,
-      h('h1', null, '📺 KCTVM Scheduler'),
-      lastUpdated && h('span', { className: 'last-updated' }, `Updated ${lastUpdated}`)
-    ),
-    h('div', { className: 'container' },
-      loading
-        ? h('div', { className: 'empty' }, 'Loading…')
-        : h('div', null,
-            stats && h('div', { className: 'stats' },
-              h(StatCard, { label: 'Total Jobs', value: stats.total }),
-              h(StatCard, { label: 'Today', value: stats.today, color: 'blue' }),
-              h(StatCard, { label: 'Awaiting Tech', value: stats.awaiting_tech, color: 'amber' }),
-              h(StatCard, { label: 'Awaiting Payment', value: stats.awaiting_payment, color: 'amber' }),
-              h(StatCard, { label: 'Confirmed', value: stats.confirmed, color: 'blue' }),
-              h(StatCard, { label: 'Completed', value: stats.completed, color: 'green' }),
-              h(StatCard, { label: 'Cancelled', value: stats.cancelled, color: 'red' }),
-              h(StatCard, { label: 'Revenue', value: `$${(stats.revenue_total || 0).toFixed(0)}`, color: 'green' }),
-            ),
-            h('div', { className: 'section' },
-              h('div', { className: 'section-header' },
-                h('span', null, `Recent Jobs (${jobs.length})`),
-                h('button', { className: 'refresh-btn', onClick: load }, 'Refresh')
-              ),
-              h(JobsTable, { jobs })
-            ),
-            h('div', { className: 'section' },
-              h('div', { className: 'section-header' }, 'Send SMS'),
-              h(SendSMSPanel)
-            )
-          )
-    )
+  const send = async () => {
+    if (!draft.trim() || sending) return;
+    setSending(true);
+    try {
+      await fetch(`${RAILWAY_URL}/admin/send-sms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: phone, message: draft }),
+      });
+      setDraft("");
+      setTimeout(load, 1000);
+      onSend?.();
+    } catch (e) {
+      alert("Send failed — make sure /admin/send-sms endpoint exists on Railway");
+    }
+    setSending(false);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px 0", display: "flex", flexDirection: "column", gap: 6 }}>
+        {msgs.length === 0 && <div style={{ color: C.muted, fontSize: 12, textAlign: "center", marginTop: 20 }}>No messages yet</div>}
+        {msgs.map(m => (
+          <div key={m.id} style={{ display: "flex", justifyContent: m.role === "assistant" ? "flex-end" : "flex-start" }}>
+            <div style={{
+              maxWidth: "80%", background: m.role === "assistant" ? "#1E3A5F" : "#1A1F2E",
+              border: `1px solid ${m.role === "assistant" ? "#2563EB33" : C.border}`,
+              borderRadius: 8, padding: "7px 10px",
+            }}>
+              <div style={{ color: C.text, fontSize: 12, lineHeight: 1.4 }}>{m.content}</div>
+              <div style={{ color: C.muted, fontSize: 10, marginTop: 3 }}>
+                {m.role === "assistant" ? "Hopscotch" : "Customer"} · {new Date(m.created_at).toLocaleTimeString()}
+              </div>
+            </div>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+      <div style={{ display: "flex", gap: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
+          placeholder="Type a message as KCTVM..."
+          style={{ flex: 1, background: "#0B0E17", border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 10px", color: C.text, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+        <Btn onClick={send} variant="primary" disabled={sending || !draft.trim()}>{sending ? "..." : "Send"}</Btn>
+      </div>
+    </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(h(Dashboard));
-</script>
+// ── Job Drawer ────────────────────────────────────────────────────────────────
+function JobDrawer({ job, onClose, onRefresh, techs }) {
+  const [tab, setTab] = useState("overview");
+  const [saving, setSaving] = useState(false);
+  const [assignTech, setAssignTech] = useState("");
+  const [manualMsg, setManualMsg] = useState("");
+
+  if (!job) return null;
+
+  const tvRows = [];
+  for (let i = 1; i <= (job.num_tvs || 1); i++) {
+    if (job[`tv_${i}_size`]) tvRows.push({ n: i, size: job[`tv_${i}_size`], mount: job[`tv_${i}_mount`], wall: job[`tv_${i}_wall`], wire: job[`tv_${i}_wire`], inches: job[`tv_${i}_inches`] });
+  }
+
+  const forceStatus = async (status) => { setSaving(true); await sbPatch("jobs", job.id, { status }); onRefresh(); setSaving(false); };
+  const forcePaid = async () => { setSaving(true); await sbPatch("jobs", job.id, { paid_at: new Date().toISOString(), status: "confirmed" }); onRefresh(); setSaving(false); };
+  const forceComplete = async () => { setSaving(true); await sbPatch("jobs", job.id, { status: "completed", completed_at: new Date().toISOString() }); onRefresh(); setSaving(false); };
+
+  const dispatchToTech = async () => {
+    if (!assignTech) return;
+    const tech = techs.find(t => t.id === assignTech);
+    if (!tech) return;
+    setSaving(true);
+    await sbPatch("jobs", job.id, {
+      current_tech_id: tech.id, current_tech_name: tech.name,
+      status: "awaiting_tech_reply", tech_notified_at: new Date().toISOString(),
+    });
+    try {
+      await fetch(`${RAILWAY_URL}/admin/dispatch-tech`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.id, techId: tech.id }),
+      });
+    } catch {}
+    onRefresh(); setSaving(false);
+  };
+
+  const resendPaymentLink = async () => {
+    setSaving(true);
+    try {
+      await fetch(`${RAILWAY_URL}/admin/resend-payment`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.id }),
+      });
+      alert("Payment link resent!");
+    } catch { alert("Failed — ensure /admin/resend-payment exists"); }
+    setSaving(false);
+  };
+
+  const TABS = ["overview", "sms", "controls", "tv details"];
+
+  return (
+    <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 440, background: C.card, borderLeft: `1px solid ${C.border}`, zIndex: 100, display: "flex", flexDirection: "column" }}>
+      {/* Drawer header */}
+      <div style={{ padding: "16px 20px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>{job.customer_name}</div>
+            <div style={{ color: C.muted, fontSize: 11, fontFamily: "monospace", marginTop: 2 }}>{job.customer_phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: C.muted, fontSize: 18, cursor: "pointer", padding: 0 }}>✕</button>
+        </div>
+        <div style={{ marginTop: 8 }}><Chip status={job.status} /></div>
+        <div style={{ display: "flex", gap: 0, marginTop: 12 }}>
+          {TABS.map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              background: tab === t ? C.bg : "transparent", color: tab === t ? C.amber : C.muted,
+              border: "none", borderBottom: tab === t ? `2px solid ${C.amber}` : "2px solid transparent",
+              padding: "5px 10px", fontSize: 11, cursor: "pointer", fontWeight: 600, fontFamily: "inherit", textTransform: "capitalize",
+            }}>{t}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Drawer body */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+
+        {tab === "overview" && (
+          <>
+            <Section title="Customer">
+              <Field label="City" value={job.city} />
+              <Field label="Address" value={job.customer_address} />
+              <Field label="Preferred Time" value={job.preferred_time} />
+              <Field label="Scheduled" value={job.scheduled_time ? new Date(job.scheduled_time).toLocaleString("en-US", { timeZone: "America/Chicago" }) : null} />
+            </Section>
+            <Section title="Tech">
+              <Field label="Confirmed" value={job.confirmed_tech_name} />
+              <Field label="Current" value={job.current_tech_name} />
+              <Field label="Search Index" value={job.tech_search_index} />
+              <Field label="Notified" value={job.tech_notified_at ? new Date(job.tech_notified_at).toLocaleString("en-US", { timeZone: "America/Chicago" }) : null} />
+            </Section>
+            <Section title="Payment">
+              <Field label="Total" value={`$${job.total_price}`} />
+              <Field label="Base Payout" value={job.base_payout ? `$${job.base_payout}` : null} />
+              <Field label="Total Payout" value={job.total_payout ? `$${job.total_payout}` : null} />
+              <Field label="Paid At" value={job.paid_at ? new Date(job.paid_at).toLocaleString("en-US", { timeZone: "America/Chicago" }) : "Not paid"} />
+              <Field label="Payout Status" value={job.payout_status} />
+            </Section>
+            <Section title="Timeline">
+              <Field label="Created" value={new Date(job.created_at).toLocaleString("en-US", { timeZone: "America/Chicago" })} />
+              <Field label="Completed" value={job.completed_at ? new Date(job.completed_at).toLocaleString("en-US", { timeZone: "America/Chicago" }) : null} />
+              <Field label="Cancelled" value={job.cancelled_at ? new Date(job.cancelled_at).toLocaleString("en-US", { timeZone: "America/Chicago" }) : null} />
+              <Field label="Calendar ID" value={job.calendar_event_id} mono />
+              <Field label="Job ID" value={job.id} mono />
+            </Section>
+            {(job.tv_1_photo || job.tv_2_photo || job.tv_3_photo) && (
+              <Section title="Photos">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {[job.tv_1_photo, job.tv_2_photo, job.tv_3_photo, job.tv_4_photo, job.tv_5_photo].filter(Boolean).map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                      <img src={url} alt={`TV ${i+1}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 6, border: `1px solid ${C.border}` }} />
+                    </a>
+                  ))}
+                </div>
+              </Section>
+            )}
+          </>
+        )}
+
+        {tab === "sms" && (
+          <div style={{ height: "calc(100vh - 200px)", display: "flex", flexDirection: "column" }}>
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ color: C.muted, fontSize: 11, marginBottom: 4 }}>Conversation with {job.customer_name} ({job.customer_phone})</div>
+            </div>
+            <SmsThread phone={job.customer_phone} />
+          </div>
+        )}
+
+        {tab === "controls" && (
+          <>
+            <Section title="Force Status">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
+                  <button key={s} onClick={() => forceStatus(s)} disabled={saving || job.status === s} style={{
+                    background: job.status === s ? cfg.bg : C.card,
+                    border: `1px solid ${cfg.color}55`, color: cfg.color,
+                    borderRadius: 5, padding: "4px 8px", fontSize: 11, cursor: "pointer", fontFamily: "inherit",
+                    opacity: job.status === s ? 0.4 : 1,
+                  }}>→ {cfg.label}</button>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Payment">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {!job.paid_at && <Btn onClick={forcePaid} variant="success" disabled={saving}>✓ Mark as Paid</Btn>}
+                <Btn onClick={resendPaymentLink} variant="ghost" disabled={saving}>↻ Resend Payment Link</Btn>
+                <Btn onClick={forceComplete} variant="success" disabled={saving}>✓ Mark Complete</Btn>
+              </div>
+            </Section>
+
+            <Section title="Reassign Tech">
+              <Select value={assignTech} onChange={setAssignTech} options={[{ value: "", label: "Select a tech..." }, ...techs.map(t => ({ value: t.id, label: `${t.name} (${t.phone})` }))]} />
+              <Btn onClick={dispatchToTech} variant="primary" disabled={saving || !assignTech}>Dispatch to Tech →</Btn>
+            </Section>
+
+            <Section title="Send Manual SMS to Customer">
+              <div style={{ display: "flex", gap: 8 }}>
+                <input value={manualMsg} onChange={e => setManualMsg(e.target.value)}
+                  placeholder="Type message..."
+                  style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 10px", color: C.text, fontSize: 12, outline: "none", fontFamily: "inherit" }} />
+                <Btn onClick={async () => {
+                  if (!manualMsg.trim()) return;
+                  await fetch(`${RAILWAY_URL}/admin/send-sms`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ to: job.customer_phone, message: manualMsg }),
+                  });
+                  setManualMsg("");
+                }} variant="primary">Send</Btn>
+              </div>
+            </Section>
+
+            {job.confirmed_tech_name && (
+              <Section title="Send Manual SMS to Tech">
+                <div style={{ color: C.muted, fontSize: 11, marginBottom: 6 }}>To: {job.confirmed_tech_name}</div>
+                <SmsThread phone={techs.find(t => t.id === job.confirmed_tech_id)?.phone || ""} />
+              </Section>
+            )}
+          </>
+        )}
+
+        {tab === "tv details" && (
+          <Section title="TV Configurations">
+            {tvRows.length === 0 && <div style={{ color: C.muted, fontSize: 12 }}>No TV data</div>}
+            {tvRows.map(tv => (
+              <div key={tv.n} style={{ background: C.bg, borderRadius: 8, padding: 12, marginBottom: 10, border: `1px solid ${C.border}` }}>
+                <div style={{ color: C.amber, fontWeight: 600, fontSize: 12, marginBottom: 8 }}>TV {tv.n}{tv.inches ? ` — ${tv.inches}"` : ""}</div>
+                <Field label="Size" value={tv.size} />
+                <Field label="Mount" value={tv.mount === "yes" ? "Customer has mount" : tv.mount === "fixed" ? "Fixed (needs pickup)" : tv.mount === "articulating" ? "Articulating (needs pickup)" : tv.mount} />
+                <Field label="Wall" value={tv.wall} />
+                <Field label="Wire Concealment" value={tv.wire === "cable" ? "Yes — cable routing" : "No"} />
+              </div>
+            ))}
+          </Section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── New Job Modal ──────────────────────────────────────────────────────────────
+function NewJobModal({ onClose, onSubmit }) {
+  const [form, setForm] = useState({ name: "", phone: "", city: "", preferred_time: "", num_tvs: 1 });
+  const [tvs, setTvs] = useState(Array(5).fill(null).map(() => ({ size: "small", mount: "yes", wall: "drywall", wire: "no", inches: 55 })));
+  const [submitting, setSubmitting] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setTv = (i, k, v) => setTvs(t => t.map((tv, idx) => idx === i ? { ...tv, [k]: v } : tv));
+
+  const PRICING = { firstSmall: 140, firstLarge: 160, addSmall: 70, addLarge: 80, fixed: 60, articulating: 120, brick: 150, cable: 150 };
+  const calcPrice = () => {
+    let total = 0;
+    for (let i = 0; i < form.num_tvs; i++) {
+      const tv = tvs[i]; const isFirst = i === 0;
+      total += isFirst ? (tv.size === "small" ? PRICING.firstSmall : PRICING.firstLarge) : (tv.size === "small" ? PRICING.addSmall : PRICING.addLarge);
+      if (tv.mount === "fixed") total += PRICING.fixed;
+      if (tv.mount === "articulating") total += PRICING.articulating;
+      if (tv.wall === "brick") total += PRICING.brick;
+      if (tv.wire === "cable") total += PRICING.cable;
+    }
+    return total;
+  };
+
+  const submit = async () => {
+    if (!form.name || !form.phone || !form.city || !form.preferred_time) return alert("Fill in all customer fields");
+    setSubmitting(true);
+    const phone = form.phone.startsWith("+") ? form.phone : `+1${form.phone.replace(/\D/g, "")}`;
+    const payload = { ...form, phone, total_price: calcPrice(), lift_confirmed: true };
+    for (let i = 0; i < form.num_tvs; i++) {
+      const n = i + 1;
+      payload[`tv_${n}_size`] = tvs[i].size;
+      payload[`tv_${n}_mount`] = tvs[i].mount;
+      payload[`tv_${n}_wall`] = tvs[i].wall;
+      payload[`tv_${n}_wire`] = tvs[i].wire;
+      payload[`tv_${n}_inches`] = tvs[i].inches;
+    }
+    try {
+      await fetch(`${RAILWAY_URL}/webhook/quote`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      onSubmit();
+    } catch (e) { alert("Error: " + e.message); }
+    setSubmitting(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000090", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 24, width: 560, maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
+          <div style={{ color: C.text, fontWeight: 700, fontSize: 17 }}>📞 New Job (Phone Intake)</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: C.muted, fontSize: 18, cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
+          <Input label="Customer Name *" value={form.name} onChange={v => set("name", v)} placeholder="John Smith" />
+          <Input label="Phone *" value={form.phone} onChange={v => set("phone", v)} placeholder="913-555-0100" />
+          <Input label="City *" value={form.city} onChange={v => set("city", v)} placeholder="Kansas City" />
+          <Input label="Preferred Time *" value={form.preferred_time} onChange={v => set("preferred_time", v)} placeholder="Tomorrow at 2pm" />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ color: C.muted, fontSize: 11, display: "block", marginBottom: 5 }}>Number of TVs</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[1,2,3,4,5].map(n => (
+              <button key={n} onClick={() => set("num_tvs", n)} style={{
+                width: 34, height: 34, borderRadius: 6, border: `1px solid ${form.num_tvs === n ? C.amber : C.border}`,
+                background: form.num_tvs === n ? "#2D1B00" : C.bg, color: form.num_tvs === n ? C.amber : C.muted,
+                cursor: "pointer", fontWeight: 700, fontFamily: "inherit",
+              }}>{n}</button>
+            ))}
+          </div>
+        </div>
+        {Array.from({ length: form.num_tvs }, (_, i) => (
+          <div key={i} style={{ background: C.bg, borderRadius: 8, padding: 12, marginBottom: 10, border: `1px solid ${C.border}` }}>
+            <div style={{ color: C.amber, fontWeight: 600, fontSize: 12, marginBottom: 8 }}>TV {i + 1}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+              <Select label="Size" value={tvs[i].size} onChange={v => setTv(i, "size", v)} options={[{ value: "small", label: 'Under 65"' }, { value: "large", label: '65" or larger' }]} />
+              <Input label="Inches" value={tvs[i].inches} onChange={v => setTv(i, "inches", parseInt(v) || 55)} type="number" placeholder="55" />
+              <Select label="Mount" value={tvs[i].mount} onChange={v => setTv(i, "mount", v)} options={[{ value: "yes", label: "Has mount" }, { value: "fixed", label: "Need fixed (+$60)" }, { value: "articulating", label: "Need articulating (+$120)" }]} />
+              <Select label="Wall" value={tvs[i].wall} onChange={v => setTv(i, "wall", v)} options={[{ value: "drywall", label: "Drywall" }, { value: "brick", label: "Brick (+$150)" }]} />
+              <Select label="Wires" value={tvs[i].wire} onChange={v => setTv(i, "wire", v)} options={[{ value: "no", label: "No concealment" }, { value: "cable", label: "Cable routing (+$150)" }]} />
+            </div>
+          </div>
+        ))}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+          <div style={{ color: C.amber, fontWeight: 700, fontSize: 20 }}>${calcPrice()}</div>
+          <Btn onClick={submit} variant="primary" disabled={submitting}>{submitting ? "Creating..." : "Create Job →"}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tech Manager ──────────────────────────────────────────────────────────────
+function TechManager({ techs, onRefresh }) {
+  const [form, setForm] = useState({ name: "", phone: "", priority: 1 });
+  const [saving, setSaving] = useState(false);
+
+  const addTech = async () => {
+    if (!form.name || !form.phone) return;
+    setSaving(true);
+    const phone = form.phone.startsWith("+") ? form.phone : `+1${form.phone.replace(/\D/g, "")}`;
+    await sbPost("technicians", { ...form, phone, active: true });
+    setForm({ name: "", phone: "", priority: techs.length + 1 });
+    onRefresh(); setSaving(false);
+  };
+
+  const removeTech = async (id) => {
+    if (!confirm("Remove this tech?")) return;
+    await sbDelete("technicians", id);
+    onRefresh();
+  };
+
+  const toggleActive = async (tech) => {
+    await sbPatch("technicians", tech.id, { active: !tech.active });
+    onRefresh();
+  };
+
+  return (
+    <div style={{ padding: 24, maxWidth: 600 }}>
+      <div style={{ color: C.text, fontWeight: 700, fontSize: 16, marginBottom: 16 }}>Tech Roster</div>
+      {techs.sort((a, b) => a.priority - b.priority).map(t => (
+        <div key={t.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", marginBottom: 8, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 24, height: 24, borderRadius: "50%", background: t.active ? "#052E16" : "#1F2937", border: `1px solid ${t.active ? C.green : C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: t.active ? C.green : C.muted, fontWeight: 700, flexShrink: 0 }}>{t.priority}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: C.text, fontSize: 13, fontWeight: 600 }}>{t.name}</div>
+            <div style={{ color: C.muted, fontSize: 11, fontFamily: "monospace" }}>{t.phone}</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Btn onClick={() => toggleActive(t)} variant={t.active ? "success" : "ghost"} style={{ fontSize: 11 }}>{t.active ? "Active" : "Inactive"}</Btn>
+            <Btn onClick={() => removeTech(t.id)} variant="danger" style={{ fontSize: 11 }}>Remove</Btn>
+          </div>
+        </div>
+      ))}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginTop: 16 }}>
+        <div style={{ color: C.amber, fontSize: 11, fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Add Tech</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "0 10px", alignItems: "end" }}>
+          <Input label="Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Jane Smith" small />
+          <Input label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="816-555-0100" small />
+          <div style={{ marginBottom: 6 }}>
+            <label style={{ color: C.muted, fontSize: 11, display: "block", marginBottom: 3 }}>Priority</label>
+            <input type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: parseInt(e.target.value) || 1 }))}
+              style={{ width: 56, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 12, outline: "none" }} />
+          </div>
+        </div>
+        <Btn onClick={addTech} variant="primary" disabled={saving || !form.name || !form.phone}>{saving ? "Adding..." : "Add Tech"}</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
+function Dashboard() {
+  const [jobs, setJobs] = useState([]);
+  const [techs, setTechs] = useState([]);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [showNewJob, setShowNewJob] = useState(false);
+  const [page, setPage] = useState("jobs");
+  const [loading, setLoading] = useState(true);
+  const [health, setHealth] = useState({ supabase: null, railway: null });
+  const [filter, setFilter] = useState("active");
+  const [search, setSearch] = useState("");
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [smsTechPhone, setSmsTechPhone] = useState("");
+
+  const fetchJobs = useCallback(async () => {
+    try {
+      const data = await sbGet("jobs", "order=created_at.desc&limit=200");
+      setJobs(Array.isArray(data) ? data : []);
+      setHealth(h => ({ ...h, supabase: true }));
+      if (selectedJob) {
+        const updated = Array.isArray(data) ? data.find(j => j.id === selectedJob.id) : null;
+        if (updated) setSelectedJob(updated);
+      }
+    } catch { setHealth(h => ({ ...h, supabase: false })); }
+    setLastRefresh(new Date());
+    setLoading(false);
+  }, [selectedJob?.id]);
+
+  const fetchTechs = useCallback(async () => {
+    try { const d = await sbGet("technicians", "order=priority.asc"); setTechs(Array.isArray(d) ? d : []); } catch {}
+  }, []);
+
+  const checkRailway = useCallback(async () => {
+    try {
+      const res = await fetch(`${RAILWAY_URL}/health`, { signal: AbortSignal.timeout(4000) });
+      setHealth(h => ({ ...h, railway: res.ok }));
+    } catch { setHealth(h => ({ ...h, railway: false })); }
+  }, []);
+
+  useEffect(() => {
+    fetchJobs(); fetchTechs(); checkRailway();
+    const t = setInterval(() => { fetchJobs(); checkRailway(); }, 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  const filteredJobs = jobs.filter(j => {
+    const mf = filter === "all" ? true : filter === "active" ? ACTIVE_STATUSES.includes(j.status) : j.status === filter;
+    const ms = !search || [j.customer_name, j.customer_phone, j.city, j.confirmed_tech_name].some(v => v?.toLowerCase().includes(search.toLowerCase()));
+    return mf && ms;
+  });
+
+  const counts = {
+    active: jobs.filter(j => ACTIVE_STATUSES.includes(j.status)).length,
+    confirmed: jobs.filter(j => j.status === "confirmed").length,
+    no_tech_available: jobs.filter(j => j.status === "no_tech_available").length,
+    awaiting_payment: jobs.filter(j => j.status === "awaiting_payment").length,
+    completed: jobs.filter(j => j.status === "completed").length,
+    all: jobs.length,
+  };
+
+  const alerts = [];
+  if (health.railway === false) alerts.push({ type: "error", msg: "⚠ Railway server unreachable" });
+  if (health.supabase === false) alerts.push({ type: "error", msg: "⚠ Supabase connection failed" });
+  if (counts.no_tech_available > 0) alerts.push({ type: "warn", msg: `⚡ ${counts.no_tech_available} job(s) have no tech — manual action needed` });
+
+  const NAV = [
+    { key: "jobs", label: "Jobs" },
+    { key: "sms", label: "SMS Console" },
+    { key: "techs", label: "Tech Roster" },
+  ];
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: "Inter, -apple-system, sans-serif" }}>
+      {/* Top bar */}
+      <div style={{ borderBottom: `1px solid ${C.border}`, padding: "0 24px", display: "flex", justifyContent: "space-between", alignItems: "center", height: 52 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          <div style={{ color: C.amber, fontWeight: 900, fontSize: 15, letterSpacing: "-0.02em" }}>KCTVM OPS</div>
+          <div style={{ display: "flex", gap: 2 }}>
+            {NAV.map(n => (
+              <button key={n.key} onClick={() => setPage(n.key)} style={{
+                border: "none", color: page === n.key ? C.text : C.muted,
+                fontWeight: page === n.key ? 600 : 400, fontSize: 13, cursor: "pointer",
+                padding: "6px 12px", borderRadius: 6, fontFamily: "inherit",
+                background: page === n.key ? C.card : "none",
+              }}>{n.label}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+          <div style={{ display: "flex", gap: 14 }}>
+            <Dot ok={health.supabase} label="DB" />
+            <Dot ok={health.railway} label="Server" />
+          </div>
+          {lastRefresh && <div style={{ color: "#374151", fontSize: 10 }}>↻ {lastRefresh.toLocaleTimeString()}</div>}
+          <Btn onClick={() => setShowNewJob(true)} variant="primary" style={{ fontSize: 13 }}>+ New Job</Btn>
+        </div>
+      </div>
+
+      {/* Alerts */}
+      {alerts.map((a, i) => (
+        <div key={i} style={{ background: a.type === "error" ? "#1A0505" : "#1A1205", borderBottom: `1px solid ${a.type === "error" ? "#7F1D1D" : "#78350F"}`, padding: "8px 24px", color: a.type === "error" ? C.red : "#F59E0B", fontSize: 12 }}>
+          {a.msg}
+        </div>
+      ))}
+
+      {/* Jobs page */}
+      {page === "jobs" && (
+        <>
+          {/* Stats */}
+          <div style={{ display: "flex", gap: 1, borderBottom: `1px solid ${C.border}`, background: C.card }}>
+            {[
+              { key: "active", label: "Active", color: C.amber, count: counts.active },
+              { key: "confirmed", label: "Confirmed", color: C.green, count: counts.confirmed },
+              { key: "no_tech_available", label: "Need Attention", color: C.red, count: counts.no_tech_available },
+              { key: "awaiting_payment", label: "Awaiting Pay", color: "#34D399", count: counts.awaiting_payment },
+              { key: "completed", label: "Completed", color: "#4ADE80", count: counts.completed },
+              { key: "all", label: "All Time", color: "#818CF8", count: counts.all },
+            ].map(s => (
+              <div key={s.key} onClick={() => setFilter(s.key)} style={{
+                flex: 1, padding: "12px 16px", cursor: "pointer", textAlign: "center",
+                borderBottom: filter === s.key ? `2px solid ${s.color}` : "2px solid transparent",
+                background: filter === s.key ? `${s.color}10` : "transparent",
+              }}>
+                <div style={{ color: s.color, fontWeight: 800, fontSize: 20 }}>{s.count}</div>
+                <div style={{ color: C.muted, fontSize: 10, marginTop: 2 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", height: "calc(100vh - 130px)" }}>
+            {/* Job list */}
+            <div style={{ flex: 1, overflowY: "auto", padding: 20, paddingRight: selectedJob ? 460 : 20 }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, city, tech..."
+                  style={{ flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 7, padding: "8px 12px", color: C.text, fontSize: 12, outline: "none" }} />
+                <Btn onClick={fetchJobs}>↻ Refresh</Btn>
+              </div>
+              {loading ? <div style={{ color: C.muted, textAlign: "center", marginTop: 60 }}>Loading...</div> : (
+                <>
+                  <div style={{ color: C.muted, fontSize: 11, marginBottom: 10 }}>{filteredJobs.length} job{filteredJobs.length !== 1 ? "s" : ""}</div>
+                  {filteredJobs.map(j => {
+                    const age = Math.floor((Date.now() - new Date(j.created_at)) / 60000);
+                    const isSelected = selectedJob?.id === j.id;
+                    return (
+                      <div key={j.id} onClick={() => setSelectedJob(isSelected ? null : j)} style={{
+                        background: isSelected ? "#131D2E" : C.card,
+                        border: `1px solid ${isSelected ? "#2563EB55" : C.border}`,
+                        borderRadius: 8, padding: "12px 14px", cursor: "pointer", marginBottom: 6,
+                        transition: "border-color 0.1s",
+                      }}
+                        onMouseEnter={e => { if (!isSelected) e.currentTarget.style.borderColor = "#2D3748"; }}
+                        onMouseLeave={e => { if (!isSelected) e.currentTarget.style.borderColor = C.border; }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                          <div style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>{j.customer_name}</div>
+                          <Chip status={j.status} />
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <div style={{ color: C.muted, fontSize: 11 }}>
+                            {j.city} · {j.preferred_time} · {j.num_tvs} TV{j.num_tvs > 1 ? "s" : ""} · ${j.total_price}
+                            {j.confirmed_tech_name && <span style={{ color: C.amber }}> · {j.confirmed_tech_name}</span>}
+                          </div>
+                          <div style={{ color: "#374151", fontSize: 10 }}>{age < 60 ? `${age}m` : `${Math.floor(age/60)}h`} ago</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {filteredJobs.length === 0 && <div style={{ color: C.muted, textAlign: "center", marginTop: 60 }}>No jobs found</div>}
+                </>
+              )}
+            </div>
+
+            {selectedJob && (
+              <JobDrawer job={selectedJob} onClose={() => setSelectedJob(null)} onRefresh={fetchJobs} techs={techs} />
+            )}
+          </div>
+        </>
+      )}
+
+      {/* SMS Console page */}
+      {page === "sms" && (
+        <div style={{ display: "flex", height: "calc(100vh - 52px)" }}>
+          <div style={{ width: 240, borderRight: `1px solid ${C.border}`, overflowY: "auto", padding: 12 }}>
+            <div style={{ color: C.muted, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Active Conversations</div>
+            {[...new Map(jobs.filter(j => ACTIVE_STATUSES.includes(j.status)).map(j => [j.customer_phone, j])).values()].map(j => (
+              <div key={j.customer_phone} onClick={() => setSmsTechPhone(j.customer_phone)} style={{
+                padding: "8px 10px", borderRadius: 6, cursor: "pointer", marginBottom: 4,
+                background: smsTechPhone === j.customer_phone ? "#131D2E" : "transparent",
+                border: `1px solid ${smsTechPhone === j.customer_phone ? "#2563EB44" : "transparent"}`,
+              }}>
+                <div style={{ color: C.text, fontSize: 12, fontWeight: 500 }}>{j.customer_name}</div>
+                <div style={{ color: C.muted, fontSize: 10 }}>{j.customer_phone}</div>
+                <div style={{ marginTop: 3 }}><Chip status={j.status} /></div>
+              </div>
+            ))}
+            <div style={{ color: C.muted, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", margin: "16px 0 10px" }}>Techs</div>
+            {techs.map(t => (
+              <div key={t.phone} onClick={() => setSmsTechPhone(t.phone)} style={{
+                padding: "8px 10px", borderRadius: 6, cursor: "pointer", marginBottom: 4,
+                background: smsTechPhone === t.phone ? "#131D2E" : "transparent",
+                border: `1px solid ${smsTechPhone === t.phone ? "#2563EB44" : "transparent"}`,
+              }}>
+                <div style={{ color: C.text, fontSize: 12, fontWeight: 500 }}>{t.name}</div>
+                <div style={{ color: C.muted, fontSize: 10 }}>{t.phone}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 20 }}>
+            {smsTechPhone ? (
+              <>
+                <div style={{ color: C.text, fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Conversation: {smsTechPhone}</div>
+                <SmsThread phone={smsTechPhone} />
+              </>
+            ) : (
+              <div style={{ color: C.muted, textAlign: "center", marginTop: 80 }}>Select a contact to view conversation</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tech Roster page */}
+      {page === "techs" && <TechManager techs={techs} onRefresh={fetchTechs} />}
+
+      {showNewJob && <NewJobModal onClose={() => setShowNewJob(false)} onSubmit={() => { fetchJobs(); setShowNewJob(false); }} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Dashboard));
+  </script>
 </body>
 </html>
