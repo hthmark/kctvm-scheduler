@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechConfirmedMessage } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechConfirmedMessage } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -247,6 +247,25 @@ router.post('/inbound', async (req, res) => {
         console.log(`[SMS Inbound] Tech-reschedule customer reply from ${from} for job ${techReschedCustJob.id}: "${body}"`);
         handleTechRescheduleCustReply(techReschedCustJob, body).catch(err =>
           console.error('[SMS Inbound] TechRescheduleCustReply error:', err)
+        );
+        return;
+      }
+    }
+
+    // ── TECH-RESCHEDULE DAY CONFIRM — customer confirming day for time-only counter ─
+    if (body) {
+      const { data: techReschedDayJob } = await supabase
+        .from('jobs').select('*')
+        .or(`customer_phone.eq.${from},customer_phone.eq.+1${normalizedFrom}`)
+        .eq('status', 'tech_reschedule_day_confirm')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (techReschedDayJob) {
+        console.log(`[SMS Inbound] Tech-reschedule day confirm from ${from} for job ${techReschedDayJob.id}: "${body}"`);
+        handleTechRescheduleDayConfirm(techReschedDayJob, body).catch(err =>
+          console.error('[SMS Inbound] TechRescheduleDayConfirm error:', err)
         );
         return;
       }

@@ -487,26 +487,63 @@ async function handleTechRescheduleCustReply(job, messageText) {
 
   if (isAffirmative) {
     const newDate = new Date(job.rescheduling_new_time);
-    const displayTime = formatPreferredTime(job.rescheduling_new_time);
-    if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
-    const newEventId = await createJobEvent(job, newDate);
-    if (tech) await confirmJobEvent(newEventId, tech.name);
-    await updateJob(job.id, {
-      status: 'confirmed',
-      preferred_time: job.rescheduling_new_time,
-      scheduled_time: newDate.toISOString(),
-      calendar_event_id: newEventId,
-      rescheduling_new_time: null,
-    });
-    await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]} — see you at ${displayTime}!`);
-    if (tech) await sendSMS(tech.phone, `Customer confirmed ${displayTime} — you're all set ${tech.name.split(' ')[0]}!`);
-    console.log(`[Orchestrator] Customer confirmed tech reschedule for job ${job.id} → ${displayTime}`);
+    await _applyTechRescheduleTime(job, tech, newDate);
   } else {
-    // Customer said no — ask what time works, put job back to confirmed so their next reply hits normal reschedule detection
+    // Customer is countering with their own time
+    const parsed = attemptDateParse(messageText);
+    if (parsed && parsed > new Date()) {
+      if (hasDay(messageText)) {
+        // Day is explicit — proceed straight to confirming with tech and updating calendar
+        await _applyTechRescheduleTime(job, tech, parsed);
+      } else {
+        // Time only, no day — confirm the day with the customer first
+        const dayLabel = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'long' });
+        const timeLabel = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true });
+        await updateJob(job.id, { status: 'tech_reschedule_day_confirm', rescheduling_new_time: parsed.toISOString() });
+        await sendSMS(job.customer_phone, `Got it — just to confirm, are you thinking ${timeLabel} this ${dayLabel}?`);
+        console.log(`[Orchestrator] Customer countered with time-only "${messageText}" for job ${job.id} — asking day confirm`);
+      }
+    } else {
+      // No parseable time — ask what works
+      await updateJob(job.id, { status: 'confirmed', rescheduling_new_time: null });
+      await sendSMS(job.customer_phone, `No problem — what day and time works better for you?`);
+      if (tech) await sendSMS(tech.phone, `The customer can't do that time — we'll work out a new time with them and let you know.`);
+      console.log(`[Orchestrator] Customer rejected tech reschedule for job ${job.id} — routing back to normal flow`);
+    }
+  }
+}
+
+async function _applyTechRescheduleTime(job, tech, newDate) {
+  const displayTime = formatPreferredTime(newDate.toISOString());
+  if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
+  const newEventId = await createJobEvent(job, newDate);
+  if (tech) await confirmJobEvent(newEventId, tech.name);
+  await updateJob(job.id, {
+    status: 'confirmed',
+    preferred_time: newDate.toISOString(),
+    scheduled_time: newDate.toISOString(),
+    calendar_event_id: newEventId,
+    rescheduling_new_time: null,
+  });
+  await sendSMS(job.customer_phone, `You're all set, ${job.customer_name.split(' ')[0]} — see you at ${displayTime}!`);
+  if (tech) await sendSMS(tech.phone, `New time confirmed: ${displayTime}. You're all set ${tech.name.split(' ')[0]}!`);
+  console.log(`[Orchestrator] Tech reschedule confirmed for job ${job.id} → ${displayTime}`);
+}
+
+async function handleTechRescheduleDayConfirm(job, messageText) {
+  const { data: tech } = job.confirmed_tech_id
+    ? await supabase.from('technicians').select('*').eq('id', job.confirmed_tech_id).single()
+    : { data: null };
+  const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|sounds good|perfect|great|absolutely|definitely|correct|confirmed|confirm|go ahead|sounds great|works for me|good|all good)$/i.test(messageText.toLowerCase().trim());
+
+  if (isAffirmative && job.rescheduling_new_time) {
+    const newDate = new Date(job.rescheduling_new_time);
+    await _applyTechRescheduleTime(job, tech, newDate);
+  } else {
+    // Customer corrected or said no — ask fresh
     await updateJob(job.id, { status: 'confirmed', rescheduling_new_time: null });
-    await sendSMS(job.customer_phone, `No problem — what day and time works better for you?`);
-    if (tech) await sendSMS(tech.phone, `The customer can't do that time — we'll work out a new time with them and let you know.`);
-    console.log(`[Orchestrator] Customer rejected tech reschedule for job ${job.id} — routing back to normal flow`);
+    await sendSMS(job.customer_phone, `What day and time works for you?`);
+    console.log(`[Orchestrator] Customer denied day confirm for job ${job.id} — asking fresh`);
   }
 }
 
@@ -735,4 +772,4 @@ async function handleRescheduleReply(job, techId, reply) {
   }
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechConfirmedMessage };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechConfirmedMessage };
