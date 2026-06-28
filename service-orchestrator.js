@@ -182,7 +182,7 @@ async function techAccepted(job, techId) {
 
 async function checkTechTimeouts() {
   console.log('[TechTimeout] Checking for timed-out awaiting_tech_reply jobs');
-  const timeoutMinutes = parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 1;
+  const timeoutMinutes = 1; // hardcoded for testing; restore env var before go-live
   const cutoff = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   console.log(`[TechTimeout] cutoff=${cutoff} (timeout=${timeoutMinutes}min)`);
 
