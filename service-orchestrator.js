@@ -5,7 +5,6 @@ const { generateTechMessage, analyzeJobPhotos } = require('./service-claude');
 const { createPaymentLink, checkPaymentStatus } = require('./service-stripe');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-const TECH_TIMEOUT_MS = (parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 1) * 60 * 1000;
 const GOOGLE_REVIEW_URL = 'https://g.page/r/CWmvZghawMfzEBM/review';
 const OWNER_PHONE = process.env.OWNER_PHONE || '+13862287246';
 
@@ -142,8 +141,7 @@ async function dispatchToNextTech(jobId) {
   await sendSMS(tech.phone, message);
   await updateJob(jobId, { status: 'awaiting_tech_reply', current_tech_id: tech.id, current_tech_name: tech.name, tech_notified_at: new Date().toISOString(), tech_search_index: index });
   await supabase.from('tech_contacts').insert({ job_id: jobId, tech_id: tech.id, tech_name: tech.name, message_sent: message, sent_at: new Date().toISOString(), status: 'pending' });
-  setTimeout(() => checkTechTimeout(jobId, tech.id), TECH_TIMEOUT_MS);
-  console.log(`[Orchestrator] Job ${jobId} — dispatched to tech ${tech.name} (index ${index})`);
+  console.log(`[Orchestrator] Job ${jobId} — dispatched to tech ${tech.name} (index ${index}), timeout enforced by Supabase-backed poll`);
 }
 
 async function handleTechReply(jobId, techId, reply) {
@@ -182,12 +180,22 @@ async function techAccepted(job, techId) {
   setTimeout(() => checkPaymentReminder(job.id, '2hr'), 2 * 60 * 60 * 1000);
 }
 
-async function checkTechTimeout(jobId, techId) {
-  const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
-  if (job.status === 'awaiting_tech_reply' && job.current_tech_id === techId) {
-    await supabase.from('tech_contacts').update({ status: 'timeout' }).eq('job_id', jobId).eq('tech_id', techId);
-    await updateJob(jobId, { tech_search_index: job.tech_search_index + 1 });
-    await dispatchToNextTech(jobId);
+async function checkTechTimeouts() {
+  console.log('[TechTimeout] Checking for timed-out tech_search jobs');
+  const timeoutMinutes = parseInt(process.env.TECH_REPLY_TIMEOUT_MINUTES) || 1;
+  const cutoff = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
+  const { data: jobs, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('status', 'awaiting_tech_reply')
+    .lt('tech_notified_at', cutoff);
+  if (error) { console.error('[TechTimeout] Query error:', error.message); return; }
+  if (!jobs || jobs.length === 0) return;
+  for (const job of jobs) {
+    console.log(`[TechTimeout] Job ${job.id} timed out waiting for tech ${job.current_tech_id} — advancing`);
+    await supabase.from('tech_contacts').update({ status: 'timeout' }).eq('job_id', job.id).eq('tech_id', job.current_tech_id);
+    await updateJob(job.id, { tech_search_index: (job.tech_search_index || 0) + 1 });
+    await dispatchToNextTech(job.id).catch(err => console.error(`[TechTimeout] dispatchToNextTech error for job ${job.id}:`, err.message));
   }
 }
 
@@ -837,4 +845,4 @@ async function handleRescheduleReply(job, techId, reply) {
   }
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechRescheduleImpliedDayConfirm, handleTechRescheduleReconfirm, handleTechConfirmedMessage };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, checkTechTimeouts, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechRescheduleImpliedDayConfirm, handleTechRescheduleReconfirm, handleTechConfirmedMessage };

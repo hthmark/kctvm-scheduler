@@ -24,6 +24,9 @@ app.use('/jobs', require('./route-jobs'));
 
 console.log('[Server] All routes loaded successfully');
 
+const { checkTechTimeouts } = require('./service-orchestrator');
+setInterval(() => checkTechTimeouts().catch(err => console.error('[TechTimeout] Poll error:', err.message)), 60 * 1000);
+
 app.get('/', (req, res) => res.json({ status: 'KCTVM Scheduler running' }));
 app.get('/payment-success', (req, res) => {
   res.send('<html><body style="font-family:sans-serif;text-align:center;padding:60px"><h1>✅ Payment received!</h1><p>Your TV mounting appointment is confirmed. You\'ll receive a text shortly.</p></body></html>');
