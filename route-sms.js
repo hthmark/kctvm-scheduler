@@ -43,9 +43,10 @@ router.post('/inbound', async (req, res) => {
     console.log(`[SMS Inbound] From: ${from} | Body: "${body}" | Media: ${mediaUrls.length} files`);
 
     // ── CHECK IF SENDER IS A TECH ────────────────────────────────────────────
-    const { data: tech } = await supabase
+    const { data: tech, error: techLookupError } = await supabase
       .from('technicians').select('id, name')
       .or(`phone.eq.${from},phone.eq.+1${normalizedFrom}`).single();
+    console.log(`[SMS Inbound] Tech lookup for ${from} (normalized: +1${normalizedFrom}) — result: ${tech ? `found: ${tech.name} (${tech.id})` : `not found (${techLookupError?.message || 'no match'})`}`);
 
     if (tech) {
       console.log(`[SMS Inbound] Tech found: ${tech.name}, body: "${bodyLower}", media: ${mediaUrls.length}`);

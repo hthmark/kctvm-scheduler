@@ -164,6 +164,8 @@ async function handleTechReply(jobId, techId, reply) {
       await techAccepted(job, techId);
     }
   } else {
+    const { data: decliningTech } = await supabase.from('technicians').select('name, phone').eq('id', techId).single();
+    if (decliningTech) await sendSMS(decliningTech.phone, `No worries ${decliningTech.name}, thanks for getting back to me.`);
     await updateJob(jobId, { tech_search_index: job.tech_search_index + 1 });
     await dispatchToNextTech(jobId);
   }
