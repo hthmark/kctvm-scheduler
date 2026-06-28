@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use('/sms', require('./route-sms'));
 app.use('/jobs', require('./route-jobs'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public', 'dashboard.html')));
 
 app.post('/admin/send-sms', async (req, res) => {
   const { to, message } = req.body;
