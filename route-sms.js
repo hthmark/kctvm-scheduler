@@ -50,6 +50,16 @@ router.post('/inbound', async (req, res) => {
     if (tech) {
       console.log(`[SMS Inbound] Tech found: ${tech.name}, body: "${bodyLower}", media: ${mediaUrls.length}`);
 
+      // Fetch tech's most relevant active job for debug visibility and status-based routing
+      const { data: techActiveJob } = await supabase
+        .from('jobs').select('*')
+        .or(`confirmed_tech_id.eq.${tech.id},current_tech_id.eq.${tech.id}`)
+        .not('status', 'in', '("completed","cancelled")')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .single();
+      console.log(`[TechHandler] status="${techActiveJob?.status}" confirmed_tech_id="${techActiveJob?.confirmed_tech_id}" current_tech_id="${techActiveJob?.current_tech_id}" body="${body}"`);
+
       // Tech sent photos — process them
       if (mediaUrls.length > 0) {
         const { data: confirmedJobs } = await supabase
@@ -154,8 +164,8 @@ router.post('/inbound', async (req, res) => {
       }
 
       // Tech wants to cancel or reschedule a confirmed job
-      const techCancelKeywords = ["can't make it", "cant make it", "have to cancel", "something came up", "cancel"];
-      const techReschedKeywords = ["can we move", "reschedule", "can i do a different time", "running behind", "different time"];
+      const techCancelKeywords = ["can't make it", "cant make it", "have to cancel", "something came up", "cancel", "won't be able", "wont be able"];
+      const techReschedKeywords = ["can we move", "reschedule", "can i do a different time", "running behind", "different time", "can i do"];
       const techWantsCancel = techCancelKeywords.some(k => bodyLower.includes(k));
       const techWantsReschedule = techReschedKeywords.some(k => bodyLower.includes(k));
 
@@ -163,8 +173,8 @@ router.post('/inbound', async (req, res) => {
         const { data: activeConfirmedJob } = await supabase
           .from('jobs').select('*')
           .eq('confirmed_tech_id', tech.id)
-          .eq('status', 'confirmed')
-          .order('paid_at', { ascending: false })
+          .in('status', ['confirmed', 'awaiting_payment'])
+          .order('updated_at', { ascending: false })
           .limit(1)
           .single();
 
