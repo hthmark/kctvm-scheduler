@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
-const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechConfirmedMessage } = require('./service-orchestrator');
+const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechRescheduleImpliedDayConfirm, handleTechConfirmedMessage } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
 
 const supabase = createClient(
@@ -143,6 +143,20 @@ router.post('/inbound', async (req, res) => {
       if (techReschedJob) {
         handleTechRescheduleTime(techReschedJob, tech.id, body).catch(err =>
           console.error('[SMS Inbound] TechRescheduleTime error:', err)
+        );
+        return;
+      }
+
+      // Tech confirming day for a bare-time implied reschedule
+      const { data: techImpliedDayJob } = await supabase
+        .from('jobs').select('*')
+        .eq('confirmed_tech_id', tech.id)
+        .eq('status', 'tech_reschedule_day_confirm')
+        .single();
+
+      if (techImpliedDayJob) {
+        handleTechRescheduleImpliedDayConfirm(techImpliedDayJob, tech.id, body).catch(err =>
+          console.error('[SMS Inbound] TechRescheduleImpliedDayConfirm error:', err)
         );
         return;
       }
