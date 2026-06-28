@@ -216,15 +216,17 @@ router.post('/inbound', async (req, res) => {
 
       // Tech replied Done — check before confirmed-job handler so it's not swallowed
       if (bodyLower === 'done' || bodyLower.startsWith('done')) {
-        console.log(`[SMS Inbound] Tech ${tech.name} replied Done — looking for confirmed job`);
-        const { data: confirmedJobs } = await supabase
-          .from('jobs').select('id, tv_1_photo, photos_received_at')
+        console.log(`[SMS Inbound] Tech ${tech.name} replied Done — techIds: ${JSON.stringify(techIds)}`);
+        const { data: confirmedJobs, error: confirmedJobsError } = await supabase
+          .from('jobs').select('id, confirmed_tech_id, tv_1_photo, photos_received_at')
           .in('confirmed_tech_id', techIds)
           .eq('status', 'confirmed')
           .order('paid_at', { ascending: false })
           .limit(1);
+        console.log(`[SMS Inbound] Done job lookup — found: ${JSON.stringify(confirmedJobs)} error: ${confirmedJobsError?.message || 'none'}`);
         const confirmedJob = confirmedJobs?.[0] || null;
         if (confirmedJob) {
+          console.log(`[SMS Inbound] Matched job ${confirmedJob.id} confirmed_tech_id=${confirmedJob.confirmed_tech_id} tv_1_photo=${confirmedJob.tv_1_photo} photos_received_at=${confirmedJob.photos_received_at}`);
           if (!confirmedJob.tv_1_photo && !confirmedJob.photos_received_at) {
             const { sendSMS } = require('./service-sms');
             await sendSMS(from, `Don't forget to send your completion photos before we wrap up — we need those on file!`);
