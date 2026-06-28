@@ -14,8 +14,6 @@
   <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
 
-const SUPABASE_URL = "https://mznyxaowgwcfiylukayw.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im16bnl4YW93Z3djaWl5bHVrYXl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ3NTY0MTUsImV4cCI6MjA2MDMzMjQxNX0.lkIObQxYN5EDHeGpYc8YZR0FJtQ0O2UKqAz2I4Okvto";
 const RAILWAY_URL = "https://trustworthy-eagerness-production-f57c.up.railway.app";
 
 const STATUS_CONFIG = {
@@ -37,26 +35,27 @@ const STATUS_CONFIG = {
 
 const ACTIVE_STATUSES = ["new","scheduling","awaiting_time_confirm","scheduling_conflict","tech_search","awaiting_tech_reply","awaiting_payment","confirmed","tech_cancel_confirm","tech_reschedule_day_confirm","rescheduling_day_confirm","no_tech_available"];
 
-// ── Supabase helpers ──────────────────────────────────────────────────────────
-async function sbFetch(path, opts = {}) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    ...opts,
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...(opts.headers || {}),
-    },
-  });
+// ── API helpers (proxied through Railway to avoid CORS) ───────────────────────
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+async function sbGet(table, qs = "") {
+  const res = await fetch(`/api/${table}${qs ? '?' + qs : ''}`);
   if (!res.ok) throw new Error(await res.text());
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  return res.json();
 }
-const sbGet = (table, qs = "") => sbFetch(`${table}?${qs}`);
-const sbPatch = (table, id, body) => sbFetch(`${table}?id=eq.${id}`, { method: "PATCH", body: JSON.stringify(body) });
-const sbPost = (table, body) => sbFetch(table, { method: "POST", body: JSON.stringify(body) });
-const sbDelete = (table, id) => sbFetch(`${table}?id=eq.${id}`, { method: "DELETE" });
+async function sbPatch(table, id, body) {
+  const res = await fetch(`/api/${table}/${id}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+async function sbPost(table, body) {
+  const res = await fetch(`/api/${table}`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+async function sbDelete(table, id) {
+  await fetch(`/api/${table}/${id}`, { method: "DELETE" });
+}
 
 // ── Tiny UI atoms ─────────────────────────────────────────────────────────────
 const C = {

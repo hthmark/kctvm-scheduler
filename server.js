@@ -21,6 +21,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static('public'));
 
+app.use('/api', require('./route-api'));
 app.use('/webhook', require('./route-webhook'));
 app.use('/sms', require('./route-sms'));
 app.use('/jobs', require('./route-jobs'));
