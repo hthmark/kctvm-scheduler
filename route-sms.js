@@ -165,7 +165,7 @@ router.post('/inbound', async (req, res) => {
 
       // Tech wants to cancel or reschedule a confirmed job
       const techCancelKeywords = ["can't make it", "cant make it", "have to cancel", "something came up", "cancel", "won't be able", "wont be able"];
-      const techReschedKeywords = ["can we move", "reschedule", "can i do a different time", "running behind", "different time", "can i do"];
+      const techReschedKeywords = ["can we move", "reschedule", "can i do a different time", "running behind", "different time", "can i do", "can we make it", "what about", "can we do", "would it work", "is there any way"];
       const techWantsCancel = techCancelKeywords.some(k => bodyLower.includes(k));
       const techWantsReschedule = techReschedKeywords.some(k => bodyLower.includes(k));
 
