@@ -323,7 +323,9 @@ router.post('/inbound', async (req, res) => {
         return;
       }
 
-      // No active job found — drop silently
+      // No active job at all — let the tech know we're covered
+      const { sendSMS: sms } = require('./service-sms');
+      await sms(from, `Hey ${tech.name.split(' ')[0]}, thanks for getting back! We actually got this one covered — we'll reach out for the next one.`);
       return;
     }
 
