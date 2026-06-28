@@ -63,7 +63,7 @@ async function generateTechMessage(job, tech) {
   }
 
   const prompt = `Write a job notification text for a TV mounting technician.
-Tech name: ${tech.name} (use first name only)
+Tech name: ${tech.name} (use the full name in the message)
 Customer first name: ${job.customer_name.split(' ')[0]}
 City: ${job.city}
 Time: ${formatJobTime(job.preferred_time)}
