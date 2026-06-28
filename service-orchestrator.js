@@ -441,17 +441,18 @@ async function handleRescheduleConfirmDay(job, messageText) {
     const isAffirmative = /^(yes|yeah|yep|yup|sure|ok|okay|works|that works|that'll work|sounds good|perfect|great|absolutely|definitely|correct|confirmed|confirm|lets do it|let's do it|do it|go ahead|sounds great|works for me|that'll do|good|all good)$/i.test(msgLower);
     console.log(`[Reschedule] isAffirmative=${isAffirmative} hasDay=${hasDay(messageText)}`);
 
-    let newDate;
-    if (isAffirmative || !hasDay(messageText)) {
-      newDate = job.rescheduling_new_time ? new Date(job.rescheduling_new_time) : null;
-      console.log(`[Reschedule] Using stored time: ${newDate ? newDate.toISOString() : 'null'}`);
-    } else {
-      newDate = attemptDateParse(messageText);
-      console.log(`[Reschedule] Customer gave new time, parsed: ${newDate ? newDate.toISOString() : 'null'}`);
+    if (!isAffirmative) {
+      // Customer rejected the proposed time or gave a new one — treat as fresh reschedule request
+      console.log(`[Reschedule] Not affirmative — routing back through handleRescheduleRequest with: "${messageText}"`);
+      await handleRescheduleRequest(job, messageText);
+      return;
     }
 
+    const newDate = job.rescheduling_new_time ? new Date(job.rescheduling_new_time) : null;
+    console.log(`[Reschedule] Affirmative — using stored time: ${newDate ? newDate.toISOString() : 'null'}`);
+
     if (!newDate || isNaN(newDate.getTime())) {
-      console.log(`[Reschedule] Could not resolve date — asking customer again`);
+      console.log(`[Reschedule] Could not resolve stored date — asking customer again`);
       await sendSMS(job.customer_phone, `What day and time works better for you?`);
       return;
     }
@@ -488,7 +489,8 @@ async function _proceedWithRescheduleTime(job, newDate) {
 
     if (!available) {
       console.log(`[Reschedule] Time not available for job ${job.id} — finding alt`);
-      const alt = await findNextAvailableTime(null).catch(() => null);
+      const searchFloor = new Date(Math.max(newDate.getTime(), Date.now()));
+      const alt = await findNextAvailableTime(searchFloor.toISOString()).catch(() => null);
       if (alt) {
         await updateJob(job.id, { rescheduling_new_time: alt.raw });
         console.log(`[Reschedule] Wrote alt rescheduling_new_time=${alt.raw} for job ${job.id}`);
