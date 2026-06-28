@@ -525,8 +525,8 @@ async function handleTechRescheduleCustReply(job, messageText) {
     const parsed = attemptDateParse(messageText);
     if (parsed && parsed > new Date()) {
       if (hasDay(messageText)) {
-        // Day is explicit — proceed straight to confirming with tech and updating calendar
-        await _applyTechRescheduleTime(job, tech, parsed);
+        // Day is explicit — ask tech if they can do the customer's counter-time
+        await _askTechToReconfirm(job, tech, parsed);
       } else {
         // Time only, no day — confirm the day with the customer first
         const dayLabel = parsed.toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'long' });
@@ -542,6 +542,39 @@ async function handleTechRescheduleCustReply(job, messageText) {
       if (tech) await sendSMS(tech.phone, `The customer can't do that time — we'll work out a new time with them and let you know.`);
       console.log(`[Orchestrator] Customer rejected tech reschedule for job ${job.id} — routing back to normal flow`);
     }
+  }
+}
+
+async function _askTechToReconfirm(job, tech, newDate) {
+  const displayTime = formatPreferredTime(newDate.toISOString());
+  await updateJob(job.id, { status: 'tech_reschedule_tech_reconfirm', rescheduling_new_time: newDate.toISOString() });
+  if (tech) await sendSMS(tech.phone, `Hey ${tech.name.split(' ')[0]}, the customer is looking at ${displayTime} instead — does that work for you? Reply Yes or No.`);
+  console.log(`[Orchestrator] Customer countered with ${displayTime} for job ${job.id} — asked tech to reconfirm`);
+}
+
+async function handleTechRescheduleReconfirm(job, techId, isYes) {
+  const { data: tech } = await supabase.from('technicians').select('*').eq('id', techId).single();
+  const newDate = new Date(job.rescheduling_new_time);
+  const displayTime = formatPreferredTime(job.rescheduling_new_time);
+
+  if (isYes) {
+    if (job.calendar_event_id) await deleteJobEvent(job.calendar_event_id).catch(() => {});
+    const newEventId = await createJobEvent(job, newDate);
+    if (tech) await confirmJobEvent(newEventId, tech.name);
+    await updateJob(job.id, {
+      status: 'confirmed',
+      preferred_time: job.rescheduling_new_time,
+      scheduled_time: newDate.toISOString(),
+      calendar_event_id: newEventId,
+      rescheduling_new_time: null,
+    });
+    await sendSMS(job.customer_phone, `You're all set — see you at ${displayTime}!`);
+    if (tech) await sendSMS(tech.phone, `You're confirmed for ${displayTime}. Thanks ${tech.name.split(' ')[0]}!`);
+    console.log(`[Orchestrator] Tech ${tech ? tech.name : techId} reconfirmed customer counter-time ${displayTime} for job ${job.id}`);
+  } else {
+    await updateJob(job.id, { status: 'tech_reschedule_customer_confirm', rescheduling_new_time: null });
+    await sendSMS(job.customer_phone, `Our tech isn't available at that time — what other time works for you?`);
+    console.log(`[Orchestrator] Tech ${tech ? tech.name : techId} rejected customer counter-time for job ${job.id} — asking customer again`);
   }
 }
 
@@ -570,7 +603,7 @@ async function handleTechRescheduleDayConfirm(job, messageText) {
 
   if (isAffirmative && job.rescheduling_new_time) {
     const newDate = new Date(job.rescheduling_new_time);
-    await _applyTechRescheduleTime(job, tech, newDate);
+    await _askTechToReconfirm(job, tech, newDate);
   } else {
     // Customer corrected or said no — ask fresh
     await updateJob(job.id, { status: 'confirmed', rescheduling_new_time: null });
@@ -804,4 +837,4 @@ async function handleRescheduleReply(job, techId, reply) {
   }
 }
 
-module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechRescheduleImpliedDayConfirm, handleTechConfirmedMessage };
+module.exports = { processNewJob, handleTechReply, handleJobCompletion, handlePaymentComplete, handleTechPhotos, checkPaymentReminder, cancelJob, dispatchToNextTech, buildSupplyList, calculateBasePayout, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechRescheduleImpliedDayConfirm, handleTechRescheduleReconfirm, handleTechConfirmedMessage };
