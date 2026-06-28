@@ -280,7 +280,50 @@ router.post('/inbound', async (req, res) => {
         }
       }
 
-      // Tech sent something else — ignore silently
+      // Fallback — find any active job for this tech (confirmed or rescheduling)
+      const { data: fallbackJobs } = await supabase
+        .from('jobs').select('*')
+        .in('confirmed_tech_id', techIds)
+        .in('status', ['confirmed', 'rescheduling_tech_confirm'])
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      const fallbackJob = fallbackJobs?.[0] ?? null;
+
+      if (fallbackJob) {
+        const cancelKeywords = ["cancel", "can't make it", "cant make it", "can't do it", "cant do it", "have to cancel", "need to cancel", "won't be able", "wont be able"];
+        const rescheduleKeywords = ['reschedule', 'move', 'change', 'different time', 'different day', 'can we do'];
+        const isCancelIntent = cancelKeywords.some(kw => bodyLower.includes(kw));
+        const isRescheduleIntent = rescheduleKeywords.some(kw => bodyLower.includes(kw));
+        const isDone = bodyLower === 'done' || bodyLower === 'complete' || bodyLower === 'finished';
+
+        if (isDone) {
+          console.log(`[SMS Inbound] Fallback: tech ${tech.name} replied Done on job ${fallbackJob.id}`);
+          if (!fallbackJob.tv_1_photo && !fallbackJob.photos_received_at) {
+            const { sendSMS } = require('./service-sms');
+            await sendSMS(from, `Don't forget to send your completion photos before we wrap up — we need those on file!`);
+          } else {
+            await handleJobCompletion(fallbackJob.id);
+            const { sendSMS } = require('./service-sms');
+            await sendSMS(from, `Great work! Job marked complete and review request sent to the customer. 🎉`);
+          }
+        } else if (isCancelIntent) {
+          console.log(`[SMS Inbound] Fallback: cancellation intent from tech ${tech.name} on job ${fallbackJob.id}`);
+          handleTechCancelRequest(fallbackJob, tech.id, body).catch(err =>
+            console.error('[SMS Inbound] Fallback TechCancelRequest error:', err)
+          );
+        } else if (isRescheduleIntent) {
+          console.log(`[SMS Inbound] Fallback: reschedule intent from tech ${tech.name} on job ${fallbackJob.id}`);
+          handleTechRescheduleRequest(fallbackJob, tech.id, body).catch(err =>
+            console.error('[SMS Inbound] Fallback TechRescheduleRequest error:', err)
+          );
+        } else {
+          const { sendSMS } = require('./service-sms');
+          await sendSMS(from, `Hey, got your message. If you need to cancel or reschedule, just let me know.`);
+        }
+        return;
+      }
+
+      // No active job found — drop silently
       return;
     }
 
