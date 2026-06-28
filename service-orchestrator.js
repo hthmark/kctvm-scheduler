@@ -434,7 +434,7 @@ async function handleTechRescheduleTime(job, techId, timeText) {
     hour: 'numeric', minute: '2-digit', hour12: true
   });
   await updateJob(job.id, { status: 'tech_reschedule_customer_confirm', rescheduling_new_time: parsed.toISOString() });
-  await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}, our tech is running a little behind from another job — would ${displayTime} still work for you?`);
+  await sendSMS(job.customer_phone, `Hey ${job.customer_name.split(' ')[0]}, our tech had something come up — would ${displayTime} still work for you?`);
   console.log(`[Orchestrator] Tech ${tech ? tech.name : techId} proposed ${displayTime} to customer for job ${job.id}`);
 }
 
