@@ -298,7 +298,15 @@ function JobDrawer({ job, onClose, onRefresh, techs }) {
               <Field label="Base Payout" value={job.base_payout ? `$${job.base_payout}` : null} />
               <Field label="Total Payout" value={job.total_payout ? `$${job.total_payout}` : null} />
               <Field label="Paid At" value={job.paid_at ? new Date(job.paid_at).toLocaleString("en-US", { timeZone: "America/Chicago" }) : "Not paid"} />
-              <Field label="Payout Status" value={job.payout_status} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
+                <span style={{ color: C.muted, fontSize: 12, flexShrink: 0 }}>Payout Status</span>
+                <span style={{
+                  color: job.payout_status === "paid" ? C.green : job.payout_status === "pending" ? C.amber : C.sub,
+                  background: job.payout_status === "paid" ? "#052E16" : job.payout_status === "pending" ? "#2D1B00" : C.card,
+                  border: `1px solid ${job.payout_status === "paid" ? C.green + "55" : job.payout_status === "pending" ? C.amber + "55" : C.border}`,
+                  borderRadius: 5, padding: "2px 8px", fontSize: 11, fontWeight: 600,
+                }}>{job.payout_status || "—"}</span>
+              </div>
             </Section>
             <Section title="Timeline">
               <Field label="Created" value={new Date(job.created_at).toLocaleString("en-US", { timeZone: "America/Chicago" })} />
@@ -403,8 +411,8 @@ function JobDrawer({ job, onClose, onRefresh, techs }) {
 }
 
 // ── New Job Modal ──────────────────────────────────────────────────────────────
-function NewJobModal({ onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: "", phone: "", city: "", preferred_time: "", num_tvs: 1 });
+function NewJobModal({ onClose, onSubmit, prefill }) {
+  const [form, setForm] = useState({ name: prefill?.name || "", phone: prefill?.phone || "", city: prefill?.city || "", preferred_time: "", num_tvs: 1 });
   const [tvs, setTvs] = useState(Array(5).fill(null).map(() => ({ size: "small", mount: "yes", wall: "drywall", wire: "no", inches: 55 })));
   const [submitting, setSubmitting] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -490,6 +498,252 @@ function NewJobModal({ onClose, onSubmit }) {
   );
 }
 
+// ── Payouts Page ─────────────────────────────────────────────────────────────
+const PAYOUT_STATUS_CFG = {
+  pending: { label: "Pending", color: "#FBBF24", bg: "#292524" },
+  paid:    { label: "Paid ✓",  color: "#4ADE80", bg: "#052E16" },
+};
+
+function PayoutsPage() {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState({});
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await sbGet("jobs", "status=eq.completed&order=completed_at.desc");
+      setJobs(Array.isArray(data) ? data.filter(j => j.payout_status !== "paid") : []);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const markPaid = async (job) => {
+    setSaving(s => ({ ...s, [job.id]: true }));
+    await sbPatch("jobs", job.id, { payout_status: "paid" });
+    setJobs(js => js.filter(j => j.id !== job.id));
+    setSaving(s => ({ ...s, [job.id]: false }));
+  };
+
+  // Group by tech for summary
+  const byTech = {};
+  jobs.forEach(j => {
+    const name = j.confirmed_tech_name || "Unknown";
+    if (!byTech[name]) byTech[name] = 0;
+    byTech[name] += j.total_payout || j.base_payout || 0;
+  });
+  const totalOwed = Object.values(byTech).reduce((a, b) => a + b, 0);
+
+  const TH = ({ children }) => (
+    <th style={{ color: C.muted, fontSize: 11, fontWeight: 700, textAlign: "left", padding: "8px 12px", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{children}</th>
+  );
+  const TD = ({ children, mono }) => (
+    <td style={{ color: C.text, fontSize: 12, padding: "10px 12px", borderBottom: `1px solid ${C.border}`, fontFamily: mono ? "monospace" : "inherit", verticalAlign: "middle" }}>{children}</td>
+  );
+
+  return (
+    <div style={{ padding: 24 }}>
+      <div style={{ color: C.text, fontWeight: 700, fontSize: 16, marginBottom: 16 }}>Tech Payouts</div>
+
+      {/* Summary */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 20px", minWidth: 160 }}>
+          <div style={{ color: C.muted, fontSize: 11, marginBottom: 4 }}>Total Owed</div>
+          <div style={{ color: C.amber, fontWeight: 800, fontSize: 22 }}>${totalOwed.toFixed(2)}</div>
+        </div>
+        {Object.entries(byTech).map(([name, amt]) => (
+          <div key={name} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 20px", minWidth: 160 }}>
+            <div style={{ color: C.muted, fontSize: 11, marginBottom: 4 }}>{name}</div>
+            <div style={{ color: C.green, fontWeight: 700, fontSize: 18 }}>${amt.toFixed(2)}</div>
+          </div>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ color: C.muted, textAlign: "center", marginTop: 40 }}>Loading...</div>
+      ) : jobs.length === 0 ? (
+        <div style={{ color: C.muted, textAlign: "center", marginTop: 40 }}>All techs paid up!</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", background: C.card, borderRadius: 8, overflow: "hidden", border: `1px solid ${C.border}` }}>
+            <thead>
+              <tr>
+                <TH>Tech</TH>
+                <TH>Customer</TH>
+                <TH>Completed</TH>
+                <TH>Base Payout</TH>
+                <TH>Receipt Total</TH>
+                <TH>Total Payout</TH>
+                <TH>Status</TH>
+                <TH></TH>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map(j => {
+                const cfg = PAYOUT_STATUS_CFG[j.payout_status] || { label: j.payout_status || "pending", color: C.muted, bg: C.card };
+                return (
+                  <tr key={j.id}>
+                    <TD>{j.confirmed_tech_name || "—"}</TD>
+                    <TD>{j.customer_name}</TD>
+                    <TD>{j.completed_at ? new Date(j.completed_at).toLocaleDateString("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric" }) : "—"}</TD>
+                    <TD>${j.base_payout ?? "—"}</TD>
+                    <TD>${j.receipt_total ?? "—"}</TD>
+                    <TD><span style={{ color: C.amber, fontWeight: 700 }}>${j.total_payout ?? j.base_payout ?? "—"}</span></TD>
+                    <TD>
+                      <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}44`, borderRadius: 5, padding: "2px 7px", fontSize: 11, fontWeight: 600 }}>{cfg.label}</span>
+                    </TD>
+                    <TD>
+                      <Btn onClick={() => markPaid(j)} variant="success" disabled={saving[j.id]} style={{ fontSize: 11, padding: "4px 10px" }}>
+                        {saving[j.id] ? "..." : "Mark Paid"}
+                      </Btn>
+                    </TD>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Prospects Page ────────────────────────────────────────────────────────────
+const PROSPECT_STATUSES = ["new", "contacted", "warm", "cold", "converted", "dead"];
+const PROSPECT_STATUS_CFG = {
+  new:       { color: "#818CF8", bg: "#1E1B4B" },
+  contacted: { color: "#FBBF24", bg: "#292524" },
+  warm:      { color: "#F5A623", bg: "#2D1B00" },
+  cold:      { color: "#60A5FA", bg: "#1E3A5F" },
+  converted: { color: "#4ADE80", bg: "#052E16" },
+  dead:      { color: "#6B7280", bg: "#1F2937" },
+};
+const SOURCES = ["website", "referral", "cold outreach", "phone"];
+
+function ProspectsPage({ onConvertToJob }) {
+  const [prospects, setProspects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState({});
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ name: "", phone: "", email: "", city: "", source: "website", notes: "" });
+  const [adding, setAdding] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await sbGet("prospects", "order=created_at.desc");
+      setProspects(Array.isArray(data) ? data : []);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const addProspect = async () => {
+    if (!form.name) return;
+    setAdding(true);
+    try {
+      await sbPost("prospects", { ...form, status: "new" });
+      setForm({ name: "", phone: "", email: "", city: "", source: "website", notes: "" });
+      setShowAdd(false);
+      load();
+    } catch (e) { alert("Error: " + e.message); }
+    setAdding(false);
+  };
+
+  const setStatus = async (p, status) => {
+    setSaving(s => ({ ...s, [p.id]: true }));
+    await sbPatch("prospects", p.id, { status });
+    setProspects(ps => ps.map(x => x.id === p.id ? { ...x, status } : x));
+    setSaving(s => ({ ...s, [p.id]: false }));
+  };
+
+  const remove = async (p) => {
+    if (!confirm(`Remove ${p.name}?`)) return;
+    await sbDelete("prospects", p.id);
+    setProspects(ps => ps.filter(x => x.id !== p.id));
+  };
+
+  const setF = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  return (
+    <div style={{ padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>Prospects</div>
+        <Btn onClick={() => setShowAdd(s => !s)} variant="primary">{showAdd ? "Cancel" : "+ Add Prospect"}</Btn>
+      </div>
+
+      {showAdd && (
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 14px" }}>
+            <Input label="Name *" value={form.name} onChange={v => setF("name", v)} placeholder="Jane Smith" small />
+            <Input label="Phone" value={form.phone} onChange={v => setF("phone", v)} placeholder="816-555-0100" small />
+            <Input label="Email" value={form.email} onChange={v => setF("email", v)} placeholder="jane@example.com" small />
+            <Input label="City" value={form.city} onChange={v => setF("city", v)} placeholder="Kansas City" small />
+            <Select label="Source" value={form.source} onChange={v => setF("source", v)} options={SOURCES.map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} />
+          </div>
+          <Input label="Notes" value={form.notes} onChange={v => setF("notes", v)} placeholder="Any details..." small />
+          <Btn onClick={addProspect} variant="primary" disabled={adding || !form.name}>{adding ? "Adding..." : "Add Prospect"}</Btn>
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ color: C.muted, textAlign: "center", marginTop: 40 }}>Loading...</div>
+      ) : prospects.length === 0 ? (
+        <div style={{ color: C.muted, textAlign: "center", marginTop: 40 }}>No prospects yet</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {prospects.map(p => {
+            const cfg = PROSPECT_STATUS_CFG[p.status] || { color: C.muted, bg: C.card };
+            return (
+              <div key={p.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>{p.name}</span>
+                      <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}44`, borderRadius: 5, padding: "1px 7px", fontSize: 10, fontWeight: 600, textTransform: "capitalize" }}>{p.status}</span>
+                      {p.source && <span style={{ color: C.muted, fontSize: 10, background: "#1E2536", borderRadius: 4, padding: "1px 6px" }}>{p.source}</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                      {p.phone && <span style={{ color: C.sub, fontSize: 11, fontFamily: "monospace" }}>{p.phone}</span>}
+                      {p.email && <span style={{ color: C.sub, fontSize: 11 }}>{p.email}</span>}
+                      {p.city && <span style={{ color: C.sub, fontSize: 11 }}>{p.city}</span>}
+                    </div>
+                    {p.notes && <div style={{ color: C.muted, fontSize: 11, marginTop: 5, fontStyle: "italic" }}>{p.notes}</div>}
+                    <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                      {p.last_contact && <span style={{ color: "#374151", fontSize: 10 }}>Last contact: {new Date(p.last_contact).toLocaleDateString()}</span>}
+                      {p.follow_up_date && <span style={{ color: C.amber, fontSize: 10 }}>Follow-up: {new Date(p.follow_up_date).toLocaleDateString()}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      {PROSPECT_STATUSES.filter(s => s !== p.status).map(s => {
+                        const sc = PROSPECT_STATUS_CFG[s];
+                        return (
+                          <button key={s} onClick={() => setStatus(p, s)} disabled={saving[p.id]} style={{
+                            background: sc.bg, color: sc.color, border: `1px solid ${sc.color}44`,
+                            borderRadius: 4, padding: "2px 7px", fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, textTransform: "capitalize",
+                          }}>{s}</button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn onClick={() => onConvertToJob(p)} variant="success" style={{ fontSize: 11, padding: "4px 10px" }}>Convert →</Btn>
+                      <Btn onClick={() => remove(p)} variant="danger" style={{ fontSize: 11, padding: "4px 10px" }}>Remove</Btn>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Tech Manager ──────────────────────────────────────────────────────────────
 function TechManager({ techs, onRefresh }) {
   const [form, setForm] = useState({ name: "", phone: "", priority: 1 });
@@ -561,6 +815,7 @@ function Dashboard() {
   const [search, setSearch] = useState("");
   const [lastRefresh, setLastRefresh] = useState(null);
   const [smsTechPhone, setSmsTechPhone] = useState("");
+  const [convertProspect, setConvertProspect] = useState(null);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -617,6 +872,8 @@ function Dashboard() {
     { key: "jobs", label: "Jobs" },
     { key: "sms", label: "SMS Console" },
     { key: "techs", label: "Tech Roster" },
+    { key: "payouts", label: "Payouts" },
+    { key: "prospects", label: "Prospects" },
   ];
 
   return (
@@ -771,7 +1028,24 @@ function Dashboard() {
       {/* Tech Roster page */}
       {page === "techs" && <TechManager techs={techs} onRefresh={fetchTechs} />}
 
-      {showNewJob && <NewJobModal onClose={() => setShowNewJob(false)} onSubmit={() => { fetchJobs(); setShowNewJob(false); }} />}
+      {/* Payouts page */}
+      {page === "payouts" && <PayoutsPage />}
+
+      {/* Prospects page */}
+      {page === "prospects" && (
+        <ProspectsPage onConvertToJob={(p) => {
+          setConvertProspect(p);
+          setShowNewJob(true);
+        }} />
+      )}
+
+      {showNewJob && (
+        <NewJobModal
+          prefill={convertProspect ? { name: convertProspect.name, phone: convertProspect.phone || "", city: convertProspect.city || "" } : null}
+          onClose={() => { setShowNewJob(false); setConvertProspect(null); }}
+          onSubmit={() => { fetchJobs(); setShowNewJob(false); setConvertProspect(null); }}
+        />
+      )}
     </div>
   );
 }

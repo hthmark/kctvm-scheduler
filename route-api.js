@@ -5,7 +5,7 @@ const axios = require('axios');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-const ALLOWED_TABLES = new Set(['jobs', 'technicians', 'sms_conversations']);
+const ALLOWED_TABLES = new Set(['jobs', 'technicians', 'sms_conversations', 'prospects']);
 
 const sbHeaders = {
   apikey: SUPABASE_KEY,
