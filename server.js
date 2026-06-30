@@ -41,7 +41,14 @@ app.post('/admin/send-sms', async (req, res) => {
 console.log('[Server] All routes loaded successfully');
 
 const { checkTechTimeouts } = require('./service-orchestrator');
-setInterval(() => checkTechTimeouts().catch(err => console.error('[TechTimeout] Poll error:', err.message)), 60 * 1000);
+const { isSystemEnabled } = require('./service-killswitch');
+setInterval(async () => {
+  if (!await isSystemEnabled()) {
+    console.log('[KillSwitch] System disabled, skipping timeout check');
+    return;
+  }
+  checkTechTimeouts().catch(err => console.error('[TechTimeout] Poll error:', err.message));
+}, 60 * 1000);
 
 app.get('/', (req, res) => res.json({ status: 'KCTVM Scheduler running' }));
 app.get('/payment-success', (req, res) => {

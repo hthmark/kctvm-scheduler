@@ -4,6 +4,7 @@ const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const { handleTechReply, handleJobCompletion, handleTechPhotos, handleRescheduleRequest, handleRescheduleConfirmDay, handleRescheduleReply, handleLateCancellation, handleTechCancelRequest, handleTechCancelConfirm, handleTechRescheduleRequest, handleTechRescheduleTime, handleTechRescheduleCustReply, handleTechRescheduleDayConfirm, handleTechRescheduleImpliedDayConfirm, handleTechRescheduleReconfirm, handleTechConfirmedMessage } = require('./service-orchestrator');
 const { handleConciergeMessage } = require('./service-concierge');
+const { isSystemEnabled } = require('./service-killswitch');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -34,6 +35,10 @@ function parseInbound(req) {
 router.post('/inbound', async (req, res) => {
   res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   try {
+    if (!await isSystemEnabled()) {
+      console.log('[KillSwitch] System disabled — /sms/inbound skipped');
+      return;
+    }
     const { from, body, mediaUrls } = parseInbound(req);
     if (!from) return;
     console.log('[SMS Inbound] Raw from number:', from, '| Telnyx number:', process.env.TELNYX_PHONE_NUMBER);

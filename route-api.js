@@ -14,6 +14,28 @@ const sbHeaders = {
   Prefer: 'return=representation',
 };
 
+router.get('/system-status', async (req, res) => {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/system_settings?key=eq.system_enabled&select=value`;
+    const resp = await axios.get(url, { headers: sbHeaders });
+    const row = resp.data?.[0];
+    res.json({ enabled: row?.value !== 'false' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/system-status', async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    const url = `${SUPABASE_URL}/rest/v1/system_settings?key=eq.system_enabled`;
+    await axios.patch(url, { value: enabled ? 'true' : 'false' }, { headers: sbHeaders });
+    res.json({ ok: true, enabled: !!enabled });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.use('/:table', (req, res, next) => {
   if (!ALLOWED_TABLES.has(req.params.table)) return res.status(403).json({ error: 'Forbidden' });
   next();

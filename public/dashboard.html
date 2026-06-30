@@ -816,6 +816,8 @@ function Dashboard() {
   const [lastRefresh, setLastRefresh] = useState(null);
   const [smsTechPhone, setSmsTechPhone] = useState("");
   const [convertProspect, setConvertProspect] = useState(null);
+  const [systemEnabled, setSystemEnabled] = useState(true);
+  const [killSwitchSaving, setKillSwitchSaving] = useState(false);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -842,8 +844,26 @@ function Dashboard() {
     } catch { setHealth(h => ({ ...h, railway: false })); }
   }, []);
 
+  const fetchSystemStatus = useCallback(async () => {
+    try {
+      const r = await fetch('/api/system-status');
+      const d = await r.json();
+      setSystemEnabled(!!d.enabled);
+    } catch {}
+  }, []);
+
+  const toggleSystem = async () => {
+    setKillSwitchSaving(true);
+    const next = !systemEnabled;
+    try {
+      await fetch('/api/system-status', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ enabled: next }) });
+      setSystemEnabled(next);
+    } catch { alert('Failed to toggle system'); }
+    setKillSwitchSaving(false);
+  };
+
   useEffect(() => {
-    fetchJobs(); fetchTechs(); checkRailway();
+    fetchJobs(); fetchTechs(); checkRailway(); fetchSystemStatus();
     const t = setInterval(() => { fetchJobs(); checkRailway(); }, 15000);
     return () => clearInterval(t);
   }, []);
@@ -864,6 +884,7 @@ function Dashboard() {
   };
 
   const alerts = [];
+  if (!systemEnabled) alerts.push({ type: "kill", msg: "🛑 SYSTEM DISABLED — no new jobs, SMS, or tech dispatch will be processed" });
   if (health.railway === false) alerts.push({ type: "error", msg: "⚠ Railway server unreachable" });
   if (health.supabase === false) alerts.push({ type: "error", msg: "⚠ Supabase connection failed" });
   if (counts.no_tech_available > 0) alerts.push({ type: "warn", msg: `⚡ ${counts.no_tech_available} job(s) have no tech — manual action needed` });
@@ -899,13 +920,28 @@ function Dashboard() {
             <Dot ok={health.railway} label="Server" />
           </div>
           {lastRefresh && <div style={{ color: "#374151", fontSize: 10 }}>↻ {lastRefresh.toLocaleTimeString()}</div>}
+          <button onClick={toggleSystem} disabled={killSwitchSaving} style={{
+            background: systemEnabled ? "#052E16" : "#450A0A",
+            color: systemEnabled ? C.green : C.red,
+            border: `1px solid ${systemEnabled ? C.green : C.red}55`,
+            borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700,
+            cursor: killSwitchSaving ? "not-allowed" : "pointer", fontFamily: "inherit",
+            opacity: killSwitchSaving ? 0.6 : 1, transition: "all 0.2s",
+          }}>
+            {killSwitchSaving ? "..." : systemEnabled ? "⬤ System ON" : "⬤ System OFF"}
+          </button>
           <Btn onClick={() => setShowNewJob(true)} variant="primary" style={{ fontSize: 13 }}>+ New Job</Btn>
         </div>
       </div>
 
       {/* Alerts */}
       {alerts.map((a, i) => (
-        <div key={i} style={{ background: a.type === "error" ? "#1A0505" : "#1A1205", borderBottom: `1px solid ${a.type === "error" ? "#7F1D1D" : "#78350F"}`, padding: "8px 24px", color: a.type === "error" ? C.red : "#F59E0B", fontSize: 12 }}>
+        <div key={i} style={{
+          background: a.type === "kill" ? "#2D0A0A" : a.type === "error" ? "#1A0505" : "#1A1205",
+          borderBottom: `1px solid ${a.type === "kill" ? "#991B1B" : a.type === "error" ? "#7F1D1D" : "#78350F"}`,
+          padding: "8px 24px", color: a.type === "kill" ? "#FCA5A5" : a.type === "error" ? C.red : "#F59E0B",
+          fontSize: 12, fontWeight: a.type === "kill" ? 700 : 400,
+        }}>
           {a.msg}
         </div>
       ))}

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const { processNewJob } = require('./service-orchestrator');
+const { isSystemEnabled } = require('./service-killswitch');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -9,6 +10,10 @@ const supabase = createClient(
 );
 
 router.post('/quote', async (req, res) => {
+  if (!await isSystemEnabled()) {
+    console.log('[KillSwitch] System disabled — /webhook/quote blocked');
+    return res.json({ received: true, processing: false });
+  }
   try {
     const payload = req.body;
     console.log('[Webhook] Received quote:', JSON.stringify(payload));
@@ -60,6 +65,10 @@ router.post('/quote', async (req, res) => {
 });
 
 router.post('/missed-call', async (req, res) => {
+  if (!await isSystemEnabled()) {
+    console.log('[KillSwitch] System disabled — /webhook/missed-call blocked');
+    return res.json({ received: true, processing: false });
+  }
   try {
     const from = req.body.From || req.body.from || req.body.phone;
     if (!from) return res.status(400).json({ error: 'Missing From number' });
