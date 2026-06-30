@@ -59,4 +59,17 @@ router.post('/quote', async (req, res) => {
   }
 });
 
+router.post('/missed-call', async (req, res) => {
+  try {
+    const from = req.body.From || req.body.from || req.body.phone;
+    if (!from) return res.status(400).json({ error: 'Missing From number' });
+    const { sendSMS } = require('./service-sms');
+    await sendSMS(from, "Hey, sorry we missed your call! This is Gabe from Kansas City TV Mounting - text us here and we'll get you a quick quote.");
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[MissedCall] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
