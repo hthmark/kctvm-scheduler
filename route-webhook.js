@@ -10,8 +10,9 @@ const supabase = createClient(
 );
 
 router.post('/quote', async (req, res) => {
-  if (!await isSystemEnabled()) {
-    console.log('[KillSwitch] System disabled — /webhook/quote blocked');
+  const fromDashboard = req.headers['x-source'] === 'dashboard';
+  if (!fromDashboard && !await isSystemEnabled()) {
+    console.log('[KillSwitch] System disabled — /webhook/quote blocked (public submission)');
     return res.json({ received: true, processing: false });
   }
   try {

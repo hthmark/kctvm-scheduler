@@ -446,7 +446,7 @@ function NewJobModal({ onClose, onSubmit, prefill }) {
       payload[`tv_${n}_inches`] = tvs[i].inches;
     }
     try {
-      await fetch(`${RAILWAY_URL}/webhook/quote`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      await fetch(`${RAILWAY_URL}/webhook/quote`, { method: "POST", headers: { "Content-Type": "application/json", "X-Source": "dashboard" }, body: JSON.stringify(payload) });
       onSubmit();
     } catch (e) { alert("Error: " + e.message); }
     setSubmitting(false);
