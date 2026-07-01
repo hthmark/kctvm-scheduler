@@ -10,23 +10,24 @@ const ALLOWED_TABLES = new Set(['jobs', 'technicians', 'sms_conversations', 'pro
 router.post('/dashboard/suggest-reply', async (req, res) => {
   try {
     const { job, messages } = req.body;
-    if (!job || !messages) return res.status(400).json({ error: 'job and messages required' });
+    if (!messages) return res.status(400).json({ error: 'messages required' });
 
     const Anthropic = require('@anthropic-ai/sdk');
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-    const tvDetails = [];
-    for (let i = 1; i <= 10; i++) {
-      const size = job[`tv_${i}_size`];
-      if (!size || size === 'null' || size === 'undefined') continue;
-      const inches = job[`tv_${i}_inches`];
-      const mount = job[`tv_${i}_mount`];
-      const wall = job[`tv_${i}_wall`];
-      const wire = job[`tv_${i}_wire`];
-      tvDetails.push(`TV${i}: ${inches ? inches + '"' : size}, mount=${mount || '?'}, wall=${wall || 'drywall'}, wire=${wire === 'cable' ? 'concealment' : 'none'}`);
-    }
-
-    const systemPrompt = `You are the Hopscotch concierge — the friendly, professional SMS operator for Kansas City TV Mounting (KCTVM). You help customers schedule TV wall mounting appointments and answer their questions.
+    let systemPrompt;
+    if (job) {
+      const tvDetails = [];
+      for (let i = 1; i <= 10; i++) {
+        const size = job[`tv_${i}_size`];
+        if (!size || size === 'null' || size === 'undefined') continue;
+        const inches = job[`tv_${i}_inches`];
+        const mount = job[`tv_${i}_mount`];
+        const wall = job[`tv_${i}_wall`];
+        const wire = job[`tv_${i}_wire`];
+        tvDetails.push(`TV${i}: ${inches ? inches + '"' : size}, mount=${mount || '?'}, wall=${wall || 'drywall'}, wire=${wire === 'cable' ? 'concealment' : 'none'}`);
+      }
+      systemPrompt = `You are the Hopscotch concierge — the friendly, professional SMS operator for Kansas City TV Mounting (KCTVM). You help customers schedule TV wall mounting appointments and answer their questions.
 
 Current job context:
 - Customer: ${job.customer_name || 'Unknown'}
@@ -39,6 +40,11 @@ Current job context:
 ${tvDetails.length > 0 ? '- TV details:\n  ' + tvDetails.join('\n  ') : ''}
 
 Suggest a short, friendly, professional SMS reply to continue this conversation naturally. Keep it under 160 characters if possible. Reply ONLY with the suggested message text — no explanation, no quotes, no prefixes.`;
+    } else {
+      systemPrompt = `You are the Hopscotch concierge — the friendly, professional SMS operator for Kansas City TV Mounting (KCTVM). You help customers schedule TV wall mounting appointments and answer their questions.
+
+This is a new inbound lead — no job has been created yet. The customer has just texted in. Suggest a short, friendly, professional SMS reply to continue the conversation and move them toward booking. Keep it under 160 characters if possible. Reply ONLY with the suggested message text — no explanation, no quotes, no prefixes.`;
+    }
 
     const history = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -52,6 +58,34 @@ Suggest a short, friendly, professional SMS reply to continue this conversation 
     });
 
     res.json({ suggestion: response.content[0]?.text || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/leads', async (req, res) => {
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const [{ data: jobRows }, { data: msgs }] = await Promise.all([
+      supabase.from('jobs').select('customer_phone').not('customer_phone', 'is', null),
+      supabase.from('sms_conversations').select('phone, content, created_at, role').order('created_at', { ascending: false }),
+    ]);
+
+    const jobPhoneSet = new Set((jobRows || []).map(r => r.customer_phone).filter(Boolean));
+
+    const byPhone = {};
+    for (const msg of (msgs || [])) {
+      if (!msg.phone || jobPhoneSet.has(msg.phone)) continue;
+      if (!byPhone[msg.phone]) {
+        byPhone[msg.phone] = { phone: msg.phone, last_message_at: msg.created_at, last_message: msg.content, message_count: 0 };
+      }
+      byPhone[msg.phone].message_count++;
+    }
+
+    const leads = Object.values(byPhone).sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+    res.json(leads);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
