@@ -15,10 +15,11 @@
     .card-border-new                   { border-left: 4px solid #6b7280; }
     .card-border-scheduling            { border-left: 4px solid #818cf8; }
     .card-border-awaiting_time_confirm { border-left: 4px solid #a78bfa; }
+    .card-border-awaiting_payment      { border-left: 4px solid #34d399; }
     .card-border-tech_search           { border-left: 4px solid #f59e0b; }
     .card-border-awaiting_tech_reply   { border-left: 4px solid #fbbf24; }
-    .card-border-awaiting_payment      { border-left: 4px solid #34d399; }
     .card-border-confirmed             { border-left: 4px solid #10b981; }
+    .card-border-follow_up             { border-left: 4px solid #f97316; }
     .card-border-completed             { border-left: 4px solid #3b82f6; }
     .card-border-cancelled             { border-left: 4px solid #ef4444; }
     .bubble-user      { background: #f1f5f9; border-radius: 12px 12px 12px 2px; align-self: flex-start; }
@@ -77,19 +78,21 @@
 
 <script>
 const COLUMNS = [
-  { key: 'new',                   label: 'New',                   color: '#6b7280', hdr: '#f9fafb' },
+  { key: 'new',                   label: 'New (Leads)',           color: '#6b7280', hdr: '#f9fafb' },
   { key: 'scheduling',            label: 'Scheduling',            color: '#818cf8', hdr: '#eef2ff' },
   { key: 'awaiting_time_confirm', label: 'Awaiting Time Confirm', color: '#a78bfa', hdr: '#f5f3ff' },
+  { key: 'awaiting_payment',      label: 'Awaiting Payment',      color: '#34d399', hdr: '#f0fdf4' },
   { key: 'tech_search',           label: 'Tech Search',           color: '#f59e0b', hdr: '#fffbeb' },
   { key: 'awaiting_tech_reply',   label: 'Awaiting Tech Reply',   color: '#fbbf24', hdr: '#fefce8' },
-  { key: 'awaiting_payment',      label: 'Awaiting Payment',      color: '#34d399', hdr: '#f0fdf4' },
   { key: 'confirmed',             label: 'Confirmed',             color: '#10b981', hdr: '#ecfdf5' },
+  { key: 'follow_up',             label: 'Follow Up',             color: '#f97316', hdr: '#fff7ed' },
   { key: 'completed',             label: 'Completed',             color: '#3b82f6', hdr: '#eff6ff' },
   { key: 'cancelled',             label: 'Cancelled / No Tech',   color: '#ef4444', hdr: '#fef2f2' },
 ];
 
 function colKey(status) {
   if (status === 'no_tech_available') return 'cancelled';
+  if (status === 'scheduling_conflict') return 'scheduling';
   return status;
 }
 
@@ -200,6 +203,19 @@ function renderSmsThread(msgs) {
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
+function appendOptimisticMessage(text) {
+  const el = document.getElementById('sms-thread');
+  if (!el) return;
+  const ts = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const bubble = document.createElement('div');
+  bubble.className = 'flex flex-col items-end';
+  bubble.innerHTML =
+    '<div class="max-w-xs px-3 py-2 text-sm bubble-assistant opacity-70">' + escHtml(text) + '</div>' +
+    '<span class="text-gray-400 text-xs mt-0.5 px-1">' + ts + ' (sending…)</span>';
+  el.appendChild(bubble);
+  el.scrollTop = el.scrollHeight;
+}
+
 // ── KILL SWITCH ──────────────────────────────────────────────────────────────
 async function checkKillSwitch() {
   try {
@@ -233,6 +249,9 @@ function renderBoard(jobs, leads) {
     if (byCol[k]) byCol[k].push(j);
   });
 
+  const activeLeads = (leads || []).filter(function(l) { return !l.dormant; });
+  const dormantLeads = (leads || []).filter(function(l) { return l.dormant; });
+
   board.innerHTML = '';
   COLUMNS.forEach(function(col) {
     const colJobs = byCol[col.key] || [];
@@ -251,7 +270,7 @@ function renderBoard(jobs, leads) {
           '<span class="font-semibold text-gray-800 text-sm">' + escHtml(firstN(j.customer_name)) + '</span>' +
           '<span class="text-gray-400 text-xs">' + ago + '</span>' +
         '</div>' +
-        '<div class="text-gray-500 text-xs mb-1">' + escHtml(j.customer_city || '') + '</div>' +
+        '<div class="text-gray-500 text-xs mb-1">' + escHtml(j.city || '') + '</div>' +
         '<div class="flex items-center gap-2 text-xs text-gray-600">' +
           '<span>' + tvs + ' TV' + (tvs !== 1 ? 's' : '') + '</span>' +
           (price ? '<span class="font-medium text-gray-700">' + price + '</span>' : '') +
@@ -260,25 +279,41 @@ function renderBoard(jobs, leads) {
       '</div>';
     }).join('');
 
-    // Lead cards (only in New column)
+    // Lead cards — active leads in New column, dormant in Follow Up
     let leadCardsHtml = '';
     let totalCount = colJobs.length;
-    if (col.key === 'new' && leads && leads.length > 0) {
-      totalCount += leads.length;
-      leadCardsHtml = leads.map(function(lead, idx) {
-        const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
-        const preview = lead.last_message ? lead.last_message.slice(0, 60) + (lead.last_message.length > 60 ? '…' : '') : '';
-        return '<div class="bg-white rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition border-l-4" style="border-left-color:#9ca3af;opacity:0.9" onclick="openLeadPanel(' + idx + ')">' +
-          '<div class="flex items-center justify-between mb-1">' +
-            '<span class="font-semibold text-gray-600 text-sm font-mono">' + escHtml(lead.phone) + '</span>' +
-            '<span class="text-gray-400 text-xs">' + ago + '</span>' +
-          '</div>' +
-          '<div class="text-gray-500 text-xs mb-1 truncate">' + escHtml(preview) + '</div>' +
-          '<div class="flex items-center gap-2 text-xs text-gray-400">' +
-            '<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">Lead</span>' +
-            '<span>' + lead.message_count + ' msg' + (lead.message_count !== 1 ? 's' : '') + '</span>' +
-          '</div>' +
-        '</div>';
+
+    function makeLeadCard(lead, idx) {
+      const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
+      const preview = lead.last_message ? lead.last_message.slice(0, 60) + (lead.last_message.length > 60 ? '…' : '') : '';
+      const borderColor = lead.dormant ? '#f97316' : '#9ca3af';
+      const tag = lead.dormant ? 'Follow-up' : 'Lead';
+      return '<div class="bg-white rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition border-l-4" style="border-left-color:' + borderColor + ';opacity:0.9" onclick="openLeadPanel(' + idx + ')">' +
+        '<div class="flex items-center justify-between mb-1">' +
+          '<span class="font-semibold text-gray-600 text-sm font-mono">' + escHtml(lead.phone) + '</span>' +
+          '<span class="text-gray-400 text-xs">' + ago + '</span>' +
+        '</div>' +
+        '<div class="text-gray-500 text-xs mb-1 truncate">' + escHtml(preview) + '</div>' +
+        '<div class="flex items-center gap-2 text-xs text-gray-400">' +
+          '<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">' + tag + '</span>' +
+          '<span>' + lead.message_count + ' msg' + (lead.message_count !== 1 ? 's' : '') + '</span>' +
+        '</div>' +
+      '</div>';
+    }
+
+    if (col.key === 'new' && activeLeads.length > 0) {
+      totalCount += activeLeads.length;
+      leadCardsHtml = activeLeads.map(function(lead) {
+        const idx = allLeads.indexOf(lead);
+        return makeLeadCard(lead, idx);
+      }).join('');
+    }
+
+    if (col.key === 'follow_up' && dormantLeads.length > 0) {
+      totalCount += dormantLeads.length;
+      leadCardsHtml = dormantLeads.map(function(lead) {
+        const idx = allLeads.indexOf(lead);
+        return makeLeadCard(lead, idx);
       }).join('');
     }
 
@@ -300,6 +335,7 @@ async function openPanel(jobId) {
   const job = allJobs.find(function(j) { return j.id === jobId; });
   if (!job) return;
   selectedJobId = jobId;
+  console.log('[Dashboard] openPanel job.city:', job.city);
 
   const panel = document.getElementById('detail-panel');
   panel.classList.remove('panel-closed');
@@ -375,6 +411,49 @@ function renderLeadPanelShell(lead) {
     '</div>';
 }
 
+function buildActionsHtml(job) {
+  const id = escHtml(job.id);
+  const status = job.status;
+
+  if (status === 'new' || status === 'scheduling' || status === 'scheduling_conflict') {
+    return '' +
+      '<button class="action-btn bg-indigo-50 text-indigo-700" style="border:1px solid #c7d2fe" onclick="patchJobStatus(\'' + id + '\',\'awaiting_time_confirm\')">Move → Time Confirm</button>' +
+      '<button class="action-btn bg-purple-50 text-purple-700" style="border:1px solid #e9d5ff" onclick="showReschedule(\'' + id + '\')">Reschedule</button>' +
+      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
+  }
+  if (status === 'awaiting_time_confirm') {
+    return '' +
+      '<button class="action-btn bg-amber-50 text-amber-700" style="border:1px solid #fde68a" onclick="patchJobStatus(\'' + id + '\',\'tech_search\')">Move → Tech Search</button>' +
+      '<button class="action-btn bg-purple-50 text-purple-700" style="border:1px solid #e9d5ff" onclick="showReschedule(\'' + id + '\')">Reschedule</button>' +
+      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
+  }
+  if (status === 'awaiting_payment') {
+    return '' +
+      '<button class="action-btn bg-green-600 text-white" onclick="resendPayment(\'' + id + '\')">Resend Payment Link</button>' +
+      '<button class="action-btn bg-green-50 text-green-700" style="border:1px solid #a7f3d0" onclick="markPaidManual(\'' + id + '\')">Mark as Paid (manual)</button>' +
+      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
+  }
+  if (status === 'tech_search' || status === 'awaiting_tech_reply') {
+    return '' +
+      '<button class="action-btn bg-amber-500 text-white" onclick="dispatchNextTech(\'' + id + '\')">Dispatch Next Tech</button>' +
+      '<button class="action-btn bg-amber-50 text-amber-700" style="border:1px solid #fde68a" onclick="showReassignTech(\'' + id + '\')">Reassign Tech</button>' +
+      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
+  }
+  if (status === 'confirmed') {
+    return '' +
+      '<button class="action-btn bg-blue-600 text-white" onclick="markCompleted(\'' + id + '\')">Mark Completed</button>' +
+      '<button class="action-btn bg-amber-50 text-amber-700" style="border:1px solid #fde68a" onclick="showReassignTech(\'' + id + '\')">Reassign Tech</button>' +
+      '<button class="action-btn bg-purple-50 text-purple-700" style="border:1px solid #e9d5ff" onclick="showReschedule(\'' + id + '\')">Reschedule</button>';
+  }
+  if (status === 'completed') {
+    return '<button class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb" onclick="reopenJob(\'' + id + '\')">Reopen Job</button>';
+  }
+  if (status === 'cancelled' || status === 'no_tech_available') {
+    return '<button class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb" onclick="reopenJob(\'' + id + '\')">Reopen Job</button>';
+  }
+  return '';
+}
+
 function renderPanelShell(job) {
   const techName = job.confirmed_tech_name || job.current_tech_name || '—';
   const payLink = job.stripe_payment_link
@@ -399,19 +478,7 @@ function renderPanelShell(job) {
       '</div>';
   }
 
-  const status = job.status;
-  let actions = '';
-  if (status === 'new' || status === 'scheduling') {
-    actions = '<button class="action-btn bg-indigo-50 text-indigo-700" style="border:1px solid #c7d2fe" disabled>Open Concierge Flow</button>';
-  } else if (status === 'awaiting_payment') {
-    actions = '<button class="action-btn bg-green-50 text-green-700" style="border:1px solid #a7f3d0" onclick="resendPayment(\'' + job.id + '\')">Resend Payment Link</button>';
-  } else if (status === 'tech_search' || status === 'awaiting_tech_reply') {
-    actions = '<button class="action-btn bg-amber-50 text-amber-700" style="border:1px solid #fde68a" onclick="dispatchTech(\'' + job.id + '\')">Dispatch Next Tech</button>';
-  } else if (status === 'confirmed') {
-    actions = '<button class="action-btn bg-blue-50 text-blue-700" style="border:1px solid #bfdbfe" onclick="markCompleted(\'' + job.id + '\')">Mark Completed</button>';
-  } else if (status === 'cancelled' || status === 'no_tech_available') {
-    actions = '<span class="text-sm text-gray-500 italic">Job Cancelled</span>';
-  }
+  const actionsHtml = buildActionsHtml(job);
 
   return '' +
     '<div class="flex items-center justify-between mb-4">' +
@@ -422,10 +489,10 @@ function renderPanelShell(job) {
     '<div class="mb-4 bg-gray-50 rounded-lg p-4">' +
       '<div class="grid grid-cols-2 gap-x-4 gap-y-3 text-sm mb-3">' +
         '<div><div class="text-gray-500 text-xs mb-0.5">Phone</div><div class="font-medium text-gray-800">' + escHtml(job.customer_phone || '—') + '</div></div>' +
-        '<div><div class="text-gray-500 text-xs mb-0.5">City</div><div class="font-medium text-gray-800">' + escHtml(job.customer_city || '—') + '</div></div>' +
+        '<div><div class="text-gray-500 text-xs mb-0.5">City</div><div class="font-medium text-gray-800">' + escHtml(job.city || '—') + '</div></div>' +
         '<div><div class="text-gray-500 text-xs mb-0.5">Status</div><div class="mt-0.5">' + statusBadge(job.status) + '</div></div>' +
         '<div><div class="text-gray-500 text-xs mb-0.5">Price</div><div class="font-medium text-gray-800">' + escHtml(job.total_price ? '$' + job.total_price : '—') + '</div></div>' +
-        '<div><div class="text-gray-500 text-xs mb-0.5">Scheduled</div><div class="font-medium text-gray-800 text-xs">' + escHtml(fmt(job.preferred_time)) + '</div></div>' +
+        '<div><div class="text-gray-500 text-xs mb-0.5">Scheduled</div><div class="font-medium text-gray-800 text-xs">' + escHtml(fmt(job.scheduled_time || job.preferred_time)) + '</div></div>' +
         '<div><div class="text-gray-500 text-xs mb-0.5">Tech</div><div class="font-medium text-gray-800">' + escHtml(techName) + '</div></div>' +
         '<div><div class="text-gray-500 text-xs mb-0.5">Payment</div><div class="font-medium text-gray-800 text-xs">' + payLink + '</div></div>' +
         (job.customer_address ? '<div class="col-span-2"><div class="text-gray-500 text-xs mb-0.5">Address</div><div class="font-medium text-gray-800 text-xs">' + escHtml(job.customer_address) + '</div></div>' : '') +
@@ -433,7 +500,7 @@ function renderPanelShell(job) {
       (tvBreakdown ? '<div class="border-t border-gray-200 pt-2">' + tvBreakdown + '</div>' : '') +
     '</div>' +
 
-    (actions ? '<div class="flex gap-2 flex-wrap mb-4">' + actions + '</div>' : '') +
+    (actionsHtml ? '<div id="action-area" class="mb-4"><div class="flex gap-2 flex-wrap">' + actionsHtml + '</div><div id="action-extra" class="mt-3"></div></div>' : '') +
 
     '<div class="mb-3">' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">SMS Thread</h3>' +
@@ -492,6 +559,10 @@ async function sendReplyToPhone(phone) {
   const text = textarea.value.trim();
   if (!text) { showToast('Message is empty'); return; }
 
+  // Optimistic append
+  appendOptimisticMessage(text);
+  textarea.value = '';
+
   try {
     await apiFetch('/admin/send-sms', {
       method: 'POST',
@@ -509,7 +580,39 @@ async function sendReplyToPhone(phone) {
   }
 }
 
+function focusReplyTextarea() {
+  const el = document.getElementById('reply-text');
+  if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+}
+
 // ── ACTIONS ───────────────────────────────────────────────────────────────────
+async function patchJob(jobId, fields) {
+  await apiFetch('/api/jobs/' + jobId, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+}
+
+async function fetchAndRefreshPanel(jobId) {
+  const jobs = await apiFetch('/jobs?limit=300');
+  allJobs = Array.isArray(jobs) ? jobs : allJobs;
+  const job = allJobs.find(function(j) { return j.id === jobId; });
+  if (job) document.getElementById('panel-content').innerHTML = renderPanelShell(job);
+}
+
+async function patchJobStatus(jobId, newStatus) {
+  try {
+    await patchJob(jobId, { status: newStatus });
+    showToast('Status updated to ' + newStatus);
+    clearActionExtra();
+    await refreshBoard();
+    await fetchAndRefreshPanel(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
 async function markCompleted(jobId) {
   try {
     await apiFetch('/jobs/' + jobId + '/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -521,14 +624,112 @@ async function markCompleted(jobId) {
   }
 }
 
-async function dispatchTech(jobId) {
-  console.warn('[Dashboard] Dispatch Next Tech endpoint not yet wired for job', jobId);
-  showToast('Endpoint not yet wired');
+async function markPaidManual(jobId) {
+  try {
+    await patchJob(jobId, { paid_at: new Date().toISOString(), status: 'confirmed' });
+    showToast('Marked as paid');
+    await refreshBoard();
+    await fetchAndRefreshPanel(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+async function reopenJob(jobId) {
+  try {
+    await patchJob(jobId, { status: 'scheduling' });
+    showToast('Job reopened → Scheduling');
+    await refreshBoard();
+    await fetchAndRefreshPanel(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+async function dispatchNextTech(jobId) {
+  try {
+    await apiFetch('/jobs/' + jobId + '/resend-tech-sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    showToast('Tech SMS dispatched');
+  } catch (e) {
+    showToast('Dispatch failed: ' + e.message);
+  }
 }
 
 async function resendPayment(jobId) {
-  console.warn('[Dashboard] Resend Payment Link endpoint not yet wired for job', jobId);
-  showToast('Endpoint not yet wired');
+  try {
+    await patchJob(jobId, { status: 'awaiting_payment' });
+    showToast('Payment status reset — resend link via SMS');
+    focusReplyTextarea();
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+function clearActionExtra() {
+  const el = document.getElementById('action-extra');
+  if (el) el.innerHTML = '';
+}
+
+async function showReassignTech(jobId) {
+  const el = document.getElementById('action-extra');
+  if (!el) return;
+  el.innerHTML = '<div class="text-xs text-gray-500 mb-1">Loading techs…</div>';
+  try {
+    const techs = await apiFetch('/jobs/techs/list');
+    const opts = techs.map(function(t) {
+      return '<option value="' + escHtml(t.id) + '">' + escHtml(t.name) + ' (' + escHtml(t.phone) + ')</option>';
+    }).join('');
+    el.innerHTML =
+      '<div class="flex items-center gap-2">' +
+        '<select id="reassign-select" class="border border-gray-200 rounded px-2 py-1.5 text-sm flex-1">' + opts + '</select>' +
+        '<button onclick="confirmReassign(\'' + escHtml(jobId) + '\')" class="action-btn bg-amber-500 text-white">Assign</button>' +
+        '<button onclick="clearActionExtra()" class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb">Cancel</button>' +
+      '</div>';
+  } catch (e) {
+    el.innerHTML = '<div class="text-red-400 text-xs">Failed to load techs: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function confirmReassign(jobId) {
+  const sel = document.getElementById('reassign-select');
+  if (!sel) return;
+  const techId = sel.value;
+  const techName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text.split(' (')[0] : '';
+  try {
+    await patchJob(jobId, { confirmed_tech_id: techId, confirmed_tech_name: techName, status: 'awaiting_tech_reply' });
+    showToast('Tech reassigned to ' + techName);
+    clearActionExtra();
+    await refreshBoard();
+    await fetchAndRefreshPanel(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+function showReschedule(jobId) {
+  const el = document.getElementById('action-extra');
+  if (!el) return;
+  el.innerHTML =
+    '<div class="flex items-center gap-2">' +
+      '<input id="reschedule-input" type="datetime-local" class="border border-gray-200 rounded px-2 py-1.5 text-sm flex-1">' +
+      '<button onclick="confirmReschedule(\'' + escHtml(jobId) + '\')" class="action-btn bg-purple-600 text-white">Set Time</button>' +
+      '<button onclick="clearActionExtra()" class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb">Cancel</button>' +
+    '</div>';
+}
+
+async function confirmReschedule(jobId) {
+  const input = document.getElementById('reschedule-input');
+  if (!input || !input.value) { showToast('Pick a date/time'); return; }
+  const isoTime = new Date(input.value).toISOString();
+  try {
+    await patchJob(jobId, { preferred_time: isoTime, scheduled_time: isoTime, status: 'awaiting_time_confirm' });
+    showToast('Rescheduled');
+    clearActionExtra();
+    await refreshBoard();
+    await fetchAndRefreshPanel(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
 }
 
 // ── REFRESH ───────────────────────────────────────────────────────────────────

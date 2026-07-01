@@ -12,39 +12,27 @@ router.post('/dashboard/suggest-reply', async (req, res) => {
     const { job, messages } = req.body;
     if (!messages) return res.status(400).json({ error: 'messages required' });
 
+    console.log('[SuggestReply] Route hit — job status:', job ? (job.status || 'unknown') : 'null (lead)', '| message count:', messages.length);
+
     const Anthropic = require('@anthropic-ai/sdk');
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-    let systemPrompt;
-    if (job) {
-      const tvDetails = [];
-      for (let i = 1; i <= 10; i++) {
-        const size = job[`tv_${i}_size`];
-        if (!size || size === 'null' || size === 'undefined') continue;
-        const inches = job[`tv_${i}_inches`];
-        const mount = job[`tv_${i}_mount`];
-        const wall = job[`tv_${i}_wall`];
-        const wire = job[`tv_${i}_wire`];
-        tvDetails.push(`TV${i}: ${inches ? inches + '"' : size}, mount=${mount || '?'}, wall=${wall || 'drywall'}, wire=${wire === 'cable' ? 'concealment' : 'none'}`);
-      }
-      systemPrompt = `You are the Hopscotch concierge — the friendly, professional SMS operator for Kansas City TV Mounting (KCTVM). You help customers schedule TV wall mounting appointments and answer their questions.
+    const systemPrompt = `You are the AI concierge for Kansas City TV Mounting, a professional TV mounting service.
+You are helping the business owner draft the next SMS reply to a customer.
 
-Current job context:
-- Customer: ${job.customer_name || 'Unknown'}
-- City: ${job.customer_city || 'N/A'}
-- Status: ${job.status || 'N/A'}
-- Scheduled time: ${job.preferred_time || 'Not yet scheduled'}
-- Assigned tech: ${job.confirmed_tech_name || job.current_tech_name || 'Not yet assigned'}
-- Total price: ${job.total_price ? '$' + job.total_price : 'Not set'}
-- Number of TVs: ${job.num_tvs || 1}
-${tvDetails.length > 0 ? '- TV details:\n  ' + tvDetails.join('\n  ') : ''}
+Job context:
+- Customer: ${job ? (job.customer_name || 'Unknown') : 'Unknown'}
+- City: ${job ? (job.city || 'Unknown') : 'Unknown'}
+- Status: ${job ? (job.status || 'lead') : 'lead'}
+- TVs: ${job ? (job.num_tvs || 'Unknown') : 'Unknown'}
+- Price: $${job ? (job.total_price || 'TBD') : 'TBD'}
+- Scheduled: ${job ? (job.scheduled_time || job.preferred_time || 'Not yet scheduled') : 'Not yet scheduled'}
+- Tech assigned: ${job ? (job.confirmed_tech_name || 'None yet') : 'None yet'}
+- Payment: ${job ? (job.paid_at ? 'Paid' : 'Not paid') : 'Not paid'}
 
-Suggest a short, friendly, professional SMS reply to continue this conversation naturally. Keep it under 160 characters if possible. Reply ONLY with the suggested message text — no explanation, no quotes, no prefixes.`;
-    } else {
-      systemPrompt = `You are the Hopscotch concierge — the friendly, professional SMS operator for Kansas City TV Mounting (KCTVM). You help customers schedule TV wall mounting appointments and answer their questions.
-
-This is a new inbound lead — no job has been created yet. The customer has just texted in. Suggest a short, friendly, professional SMS reply to continue the conversation and move them toward booking. Keep it under 160 characters if possible. Reply ONLY with the suggested message text — no explanation, no quotes, no prefixes.`;
-    }
+Based on the conversation history, write the single best next SMS reply to send to this customer.
+Be conversational, friendly, and concise. Do not use emojis.
+Return ONLY the message text, nothing else — no labels, no quotes, no explanation.`;
 
     const history = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -57,8 +45,11 @@ This is a new inbound lead — no job has been created yet. The customer has jus
       messages: history.length > 0 ? history : [{ role: 'user', content: 'Hello' }],
     });
 
-    res.json({ suggestion: response.content[0]?.text || '' });
+    const suggestion = response.content[0]?.text || '';
+    console.log('[SuggestReply] Generated suggestion:', suggestion);
+    res.json({ suggestion });
   } catch (e) {
+    console.error('[SuggestReply] Anthropic API error:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -77,11 +68,12 @@ router.get('/leads', async (req, res) => {
 
     const jobPhoneSet = new Set((jobRows || []).map(r => r.customer_phone).filter(Boolean));
 
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const byPhone = {};
     for (const msg of (msgs || [])) {
       if (!msg.phone || jobPhoneSet.has(msg.phone) || EXCLUDED_PHONES.has(msg.phone)) continue;
       if (!byPhone[msg.phone]) {
-        byPhone[msg.phone] = { phone: msg.phone, last_message_at: msg.created_at, last_message: msg.content, message_count: 0 };
+        byPhone[msg.phone] = { phone: msg.phone, last_message_at: msg.created_at, last_message: msg.content, message_count: 0, dormant: msg.created_at < twoHoursAgo };
       }
       byPhone[msg.phone].message_count++;
     }
