@@ -58,15 +58,24 @@ router.post('/dashboard/suggest-reply', async (req, res) => {
       '- Customer address: ' + (job ? (job.customer_address || 'not collected') : 'not collected') + '\n\n' +
       'Based on the conversation history and job context above, generate the single best next SMS reply exactly as the KCTVM concierge system would send it if automated flows were active. Follow all the same rules, tone, and logic. Return ONLY the message text — no labels, no quotes, no explanation.';
 
-    const history = messages
+    const cleanedMessages = (messages || [])
       .filter(m => m.role === 'user' || m.role === 'assistant')
+      .filter(m => m.content && String(m.content).trim().length > 0)
       .map(m => ({ role: m.role, content: String(m.content) }));
+
+    if (cleanedMessages.length === 0) {
+      cleanedMessages.push({ role: 'user', content: 'Hello' });
+    }
+
+    console.log('[SuggestReply] Messages being sent to Anthropic:', JSON.stringify(messages));
+    console.log('[SuggestReply] Cleaned messages count:', cleanedMessages.length);
+    console.log('[SuggestReply] First message role:', cleanedMessages[0]?.role);
 
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 300,
       system: systemPrompt,
-      messages: history.length > 0 ? history : [{ role: 'user', content: 'Hello' }],
+      messages: cleanedMessages,
     });
 
     const content = response.content;

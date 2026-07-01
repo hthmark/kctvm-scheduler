@@ -35,14 +35,22 @@ function parseInbound(req) {
 router.post('/inbound', async (req, res) => {
   res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   try {
-    if (!await isSystemEnabled()) {
-      console.log('[KillSwitch] System disabled — /sms/inbound skipped');
-      return;
-    }
     const { from, body, mediaUrls } = parseInbound(req);
     if (!from) return;
     console.log('[SMS Inbound] Raw from number:', from, '| Telnyx number:', process.env.TELNYX_PHONE_NUMBER);
     if (from === '+18162032001' || from === process.env.TELNYX_PHONE_NUMBER) return;
+
+    // Always record inbound message before kill switch check
+    if (body) {
+      await supabase.from('sms_conversations').insert({ phone: from, role: 'user', content: body }).catch(err =>
+        console.error('[SMS Inbound] Failed to record message:', err.message)
+      );
+    }
+
+    if (!await isSystemEnabled()) {
+      console.log('[KillSwitch] System disabled — message recorded, automated reply skipped');
+      return;
+    }
     const normalizedFrom = from.replace(/\D/g, '');
     const e164From = from.startsWith('+1') ? from : `${e164From}`;
     const bodyLower = (body || '').toLowerCase().trim();
