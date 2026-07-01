@@ -907,4 +907,4 @@ async function handleConciergeMessage(from, body, mediaUrls) {
   }
 }
 
-module.exports = { handleConciergeMessage };
+module.exports = { handleConciergeMessage, KNOWLEDGE_BASE };

@@ -12,15 +12,15 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     .board-col { min-width: 260px; max-width: 260px; }
-    .card-border-new                   { border-left: 4px solid #6b7280; }
-    .card-border-scheduling            { border-left: 4px solid #818cf8; }
-    .card-border-awaiting_time_confirm { border-left: 4px solid #a78bfa; }
-    .card-border-awaiting_payment      { border-left: 4px solid #34d399; }
+    .card-border-new                   { border-left: 4px solid #6366f1; }
+    .card-border-scheduling            { border-left: 4px solid #8b5cf6; }
+    .card-border-awaiting_time_confirm { border-left: 4px solid #0ea5e9; }
     .card-border-tech_search           { border-left: 4px solid #f59e0b; }
-    .card-border-awaiting_tech_reply   { border-left: 4px solid #fbbf24; }
-    .card-border-confirmed             { border-left: 4px solid #10b981; }
-    .card-border-follow_up             { border-left: 4px solid #f97316; }
-    .card-border-completed             { border-left: 4px solid #3b82f6; }
+    .card-border-awaiting_tech_reply   { border-left: 4px solid #f97316; }
+    .card-border-awaiting_payment      { border-left: 4px solid #10b981; }
+    .card-border-confirmed             { border-left: 4px solid #22c55e; }
+    .card-border-follow_up             { border-left: 4px solid #94a3b8; }
+    .card-border-completed             { border-left: 4px solid #64748b; }
     .card-border-cancelled             { border-left: 4px solid #ef4444; }
     .bubble-user      { background: #f1f5f9; border-radius: 12px 12px 12px 2px; align-self: flex-start; }
     .bubble-assistant { background: #1e40af; color: #fff; border-radius: 12px 12px 2px 12px; align-self: flex-end; }
@@ -75,13 +75,8 @@
 
 <!-- Board + Panel wrapper -->
 <div class="flex-1 overflow-hidden flex relative">
+  <div id="board" class="flex gap-4 p-4 overflow-x-auto flex-1 items-start"></div>
 
-  <!-- Kanban board -->
-  <div id="board" class="flex gap-4 p-4 overflow-x-auto flex-1 items-start">
-    <!-- columns injected by JS -->
-  </div>
-
-  <!-- Detail panel -->
   <div id="detail-panel"
        class="absolute top-0 right-0 h-full bg-white border-l border-gray-200 shadow-2xl overflow-y-auto transition-transform duration-300 panel-closed"
        style="width:440px;">
@@ -92,42 +87,41 @@
 <div id="toast" class="toast"></div>
 
 <script>
+// ── COLUMNS — chronological job lifecycle order ────────────────────────────
 const COLUMNS = [
-  { key: 'new',                   label: 'New (Leads)',           color: '#6b7280', hdr: '#f9fafb' },
-  { key: 'scheduling',            label: 'Scheduling',            color: '#818cf8', hdr: '#eef2ff' },
-  { key: 'awaiting_time_confirm', label: 'Awaiting Time Confirm', color: '#a78bfa', hdr: '#f5f3ff' },
-  { key: 'awaiting_payment',      label: 'Awaiting Payment',      color: '#34d399', hdr: '#f0fdf4' },
+  { key: 'new',                   label: 'New (Leads)',           color: '#6366f1', hdr: '#eef2ff' },
+  { key: 'scheduling',            label: 'Scheduling',            color: '#8b5cf6', hdr: '#f5f3ff' },
+  { key: 'awaiting_time_confirm', label: 'Awaiting Time Confirm', color: '#0ea5e9', hdr: '#f0f9ff' },
   { key: 'tech_search',           label: 'Tech Search',           color: '#f59e0b', hdr: '#fffbeb' },
-  { key: 'awaiting_tech_reply',   label: 'Awaiting Tech Reply',   color: '#fbbf24', hdr: '#fefce8' },
-  { key: 'confirmed',             label: 'Confirmed',             color: '#10b981', hdr: '#ecfdf5' },
-  { key: 'follow_up',             label: 'Follow Up',             color: '#f97316', hdr: '#fff7ed' },
-  { key: 'completed',             label: 'Completed',             color: '#3b82f6', hdr: '#eff6ff' },
+  { key: 'awaiting_tech_reply',   label: 'Awaiting Tech Reply',   color: '#f97316', hdr: '#fff7ed' },
+  { key: 'awaiting_payment',      label: 'Awaiting Payment',      color: '#10b981', hdr: '#f0fdf4' },
+  { key: 'confirmed',             label: 'Confirmed',             color: '#22c55e', hdr: '#f0fdf4' },
+  { key: 'follow_up',             label: 'Follow Up',             color: '#94a3b8', hdr: '#f8fafc' },
+  { key: 'completed',             label: 'Completed',             color: '#64748b', hdr: '#f8fafc' },
   { key: 'cancelled',             label: 'Cancelled / No Tech',   color: '#ef4444', hdr: '#fef2f2' },
 ];
 
 const ALL_STATUSES = [
-  'new','scheduling','awaiting_time_confirm','awaiting_payment',
-  'tech_search','awaiting_tech_reply','confirmed','completed','cancelled',
+  'new','scheduling','awaiting_time_confirm','tech_search',
+  'awaiting_tech_reply','awaiting_payment','confirmed','completed','cancelled',
 ];
 
+// Merge scheduling_conflict → scheduling, no_tech_available → cancelled
 function colKey(status) {
-  if (status === 'no_tech_available') return 'cancelled';
   if (status === 'scheduling_conflict') return 'scheduling';
+  if (status === 'no_tech_available') return 'cancelled';
   return status;
 }
 
 let allJobs = [];
 let allLeads = [];
 let selectedJobId = null;
-let currentPanelPhone = null;
-let lastThreadMsgCount = 0;
-let lastThreadTimestamp = '';
 
-// FIX 3: auto-refresh state
+// ── AUTO-REFRESH STATE ──────────────────────────────────────────────────────
 const BOARD_REFRESH_MS = 15000;
 let nextRefreshAt = 0;
 
-// ── UTILS ─────────────────────────────────────────────────────────────────────
+// ── UTILS ───────────────────────────────────────────────────────────────────
 function timeAgo(iso) {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
@@ -146,24 +140,19 @@ function fmt(iso) {
   });
 }
 
-function firstN(str) {
-  if (!str) return '?';
-  return str.split(' ')[0];
-}
+function firstN(str) { return str ? str.split(' ')[0] : '?'; }
 
 function escHtml(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function showToast(msg, isSuccess, dur) {
-  dur = dur || 3000;
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast show' + (isSuccess ? ' success' : '');
   clearTimeout(t._timer);
-  t._timer = setTimeout(function() { t.classList.remove('show'); }, dur);
+  t._timer = setTimeout(function() { t.classList.remove('show'); }, dur || 3000);
 }
-
 function showSuccess(msg) { showToast(msg, true, 2000); }
 
 async function apiFetch(path, opts) {
@@ -184,86 +173,77 @@ function countTvs(job) {
   return n || 1;
 }
 
-// ── KILL SWITCH (FIX 1) ──────────────────────────────────────────────────────
+function spinnerSvg() {
+  return '<svg class="spin w-4 h-4 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+}
+
+// ── KILL SWITCH ──────────────────────────────────────────────────────────────
 function applyKillSwitchState(enabled) {
-  const dot = document.getElementById('ks-dot');
-  const lbl = document.getElementById('ks-label');
-  const banner = document.getElementById('ks-banner');
-  if (enabled) {
-    dot.className = 'w-2.5 h-2.5 rounded-full bg-green-400';
-    lbl.textContent = 'System ON';
-    lbl.className = 'text-green-400 text-sm';
-    banner.classList.add('hidden');
-  } else {
-    dot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
-    lbl.textContent = 'System PAUSED';
-    lbl.className = 'text-red-400 text-sm';
-    banner.classList.remove('hidden');
-  }
+  document.getElementById('ks-dot').className = 'w-2.5 h-2.5 rounded-full ' + (enabled ? 'bg-green-400' : 'bg-red-500');
+  document.getElementById('ks-label').textContent = enabled ? 'System ON' : 'System PAUSED';
+  document.getElementById('ks-label').className = (enabled ? 'text-green-400' : 'text-red-400') + ' text-sm';
+  document.getElementById('ks-banner').classList.toggle('hidden', enabled);
 }
 
 async function checkKillSwitch() {
-  try {
-    const data = await apiFetch('/api/system-status');
-    applyKillSwitchState(data.enabled);
-  } catch (_) {}
+  try { applyKillSwitchState((await apiFetch('/api/system-status')).enabled); } catch (_) {}
 }
 
 async function toggleKillSwitch() {
   try {
-    const data = await apiFetch('/api/system-status/toggle', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-    });
+    const data = await apiFetch('/api/system-status/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     applyKillSwitchState(data.enabled);
     showToast(data.enabled ? 'System enabled' : 'System PAUSED', data.enabled);
-  } catch (e) {
-    showToast('Kill switch error: ' + e.message);
-  }
+  } catch (e) { showToast('Kill switch error: ' + e.message); }
 }
 
-// ── SMS THREAD POLLING (FIX 4) ───────────────────────────────────────────────
-function startSmsPolling(phone) {
-  stopSmsPolling();
-  currentPanelPhone = phone;
-  lastThreadMsgCount = 0;
-  lastThreadTimestamp = '';
-  window.threadPollInterval = setInterval(function() {
-    pollSmsThread(phone);
-  }, 5000);
+// ── SMS THREAD POLLING (FIX 1) ───────────────────────────────────────────────
+function fetchAndRenderThread(phone, showLoader) {
+  const el = document.getElementById('sms-thread');
+  if (!el || !phone) return Promise.resolve();
+  if (showLoader) el.innerHTML = '<div class="text-gray-400 text-xs text-center py-3">Loading&hellip;</div>';
+  return fetch('/api/conversations/' + encodeURIComponent(phone), { cache: 'no-store' })
+    .then(function(r) { return r.ok ? r.json() : Promise.reject(r.statusText); })
+    .then(function(msgs) {
+      const newCount = msgs ? msgs.length : 0;
+      if (newCount !== window.lastThreadMessageCount) {
+        window.lastThreadMessageCount = newCount;
+        renderSmsThread(msgs);
+      }
+    })
+    .catch(function(err) { console.warn('[Thread] fetch error:', err); });
 }
 
-function stopSmsPolling() {
+function startThreadPolling(phone) {
   if (window.threadPollInterval) {
     clearInterval(window.threadPollInterval);
     window.threadPollInterval = null;
   }
-  currentPanelPhone = null;
-}
+  window.openPanelPhone = phone;
+  window.lastThreadMessageCount = -1;
 
-async function pollSmsThread(phone) {
-  const el = document.getElementById('sms-thread');
-  if (!el || !phone) return;
-  try {
-    const msgs = await apiFetch('/api/sms_conversations?phone=eq.' + encodeURIComponent(phone) + '&order=created_at.asc');
-    const newCount = msgs ? msgs.length : 0;
-    const newTs = msgs && msgs.length ? (msgs[msgs.length - 1].created_at || '') : '';
-    if (newCount !== lastThreadMsgCount || newTs !== lastThreadTimestamp) {
-      lastThreadMsgCount = newCount;
-      lastThreadTimestamp = newTs;
-      renderSmsThread(msgs);
+  fetchAndRenderThread(phone, true);
+
+  window.threadPollInterval = setInterval(function() {
+    console.log('[ThreadPoll] Firing — phone:', window.openPanelPhone, 'interval ID:', window.threadPollInterval);
+    if (!window.openPanelPhone) {
+      clearInterval(window.threadPollInterval);
+      window.threadPollInterval = null;
+      return;
     }
-  } catch (_) {}
+    fetchAndRenderThread(window.openPanelPhone, false);
+  }, 4000);
+
+  console.log('[ThreadPoll] Started for', phone, '— interval ID:', window.threadPollInterval);
 }
 
-async function loadSmsThreadByPhone(phone) {
-  const el = document.getElementById('sms-thread');
-  if (!el || !phone) return;
-  try {
-    const msgs = await apiFetch('/api/sms_conversations?phone=eq.' + encodeURIComponent(phone) + '&order=created_at.asc');
-    lastThreadMsgCount = msgs ? msgs.length : 0;
-    lastThreadTimestamp = msgs && msgs.length ? (msgs[msgs.length - 1].created_at || '') : '';
-    renderSmsThread(msgs);
-  } catch (_) {}
+function stopThreadPolling() {
+  if (window.threadPollInterval) {
+    clearInterval(window.threadPollInterval);
+    window.threadPollInterval = null;
+  }
+  window.openPanelPhone = null;
+  console.log('[ThreadPoll] Stopped');
 }
 
 function renderSmsThread(msgs) {
@@ -273,7 +253,7 @@ function renderSmsThread(msgs) {
     el.innerHTML = '<div class="text-gray-400 text-xs text-center py-3">No messages yet</div>';
     return;
   }
-  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 20;
+  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 30;
   el.innerHTML = msgs.map(function(m) {
     const isUser = m.role === 'user';
     const ts = m.created_at
@@ -298,10 +278,10 @@ function appendOptimisticMessage(text) {
     '<span class="text-gray-400 text-xs mt-0.5 px-1">' + ts + ' (sending…)</span>';
   el.appendChild(bubble);
   el.scrollTop = el.scrollHeight;
-  lastThreadMsgCount++;
+  window.lastThreadMessageCount = (window.lastThreadMessageCount || 0) + 1;
 }
 
-// ── BOARD (FIX 3: auto-refresh) ──────────────────────────────────────────────
+// ── AUTO-REFRESH (FIX 3) ────────────────────────────────────────────────────
 function startBoardAutoRefresh() {
   if (window.boardRefreshInterval) clearInterval(window.boardRefreshInterval);
   nextRefreshAt = Date.now() + BOARD_REFRESH_MS;
@@ -311,12 +291,11 @@ function startBoardAutoRefresh() {
   }, BOARD_REFRESH_MS);
   setInterval(function() {
     const el = document.getElementById('next-refresh');
-    if (!el) return;
-    const secs = Math.max(0, Math.round((nextRefreshAt - Date.now()) / 1000));
-    el.textContent = 'next in ' + secs + 's';
+    if (el) el.textContent = 'next in ' + Math.max(0, Math.round((nextRefreshAt - Date.now()) / 1000)) + 's';
   }, 1000);
 }
 
+// ── BOARD ────────────────────────────────────────────────────────────────────
 function renderBoard(jobs, leads) {
   const board = document.getElementById('board');
   const byCol = {};
@@ -333,6 +312,7 @@ function renderBoard(jobs, leads) {
   board.innerHTML = '';
   COLUMNS.forEach(function(col) {
     const colJobs = byCol[col.key] || [];
+    let totalCount = colJobs.length;
     const div = document.createElement('div');
     div.className = 'board-col flex-none flex flex-col gap-2';
 
@@ -341,8 +321,7 @@ function renderBoard(jobs, leads) {
       const tvs = j.num_tvs || countTvs(j);
       const price = j.total_price ? '$' + j.total_price : '';
       const ago = j.created_at ? timeAgo(j.created_at) : '';
-      const borderClass = 'card-border-' + colKey(j.status);
-      return '<div class="bg-white rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition ' + borderClass + '" onclick="openPanel(\'' + j.id + '\')">' +
+      return '<div class="bg-white rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition card-border-' + colKey(j.status) + '" onclick="openPanel(\'' + j.id + '\')">' +
         '<div class="flex items-center justify-between mb-1">' +
           '<span class="font-semibold text-gray-800 text-sm">' + escHtml(firstN(j.customer_name)) + '</span>' +
           '<span class="text-gray-400 text-xs">' + ago + '</span>' +
@@ -356,38 +335,31 @@ function renderBoard(jobs, leads) {
       '</div>';
     }).join('');
 
-    let leadCardsHtml = '';
-    let totalCount = colJobs.length;
-
     function makeLeadCard(lead, idx) {
       const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
       const preview = lead.last_message ? lead.last_message.slice(0, 60) + (lead.last_message.length > 60 ? '…' : '') : '';
-      const borderColor = lead.dormant ? '#f97316' : '#9ca3af';
-      const tag = lead.dormant ? 'Follow-up' : 'Lead';
-      return '<div class="bg-white rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition border-l-4" style="border-left-color:' + borderColor + ';opacity:0.9" onclick="openLeadPanel(' + idx + ')">' +
+      const borderColor = lead.dormant ? '#94a3b8' : '#6366f1';
+      return '<div class="bg-white rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition border-l-4" style="border-left-color:' + borderColor + '" onclick="openLeadPanel(' + idx + ')">' +
         '<div class="flex items-center justify-between mb-1">' +
           '<span class="font-semibold text-gray-600 text-sm font-mono">' + escHtml(lead.phone) + '</span>' +
           '<span class="text-gray-400 text-xs">' + ago + '</span>' +
         '</div>' +
         '<div class="text-gray-500 text-xs mb-1 truncate">' + escHtml(preview) + '</div>' +
         '<div class="flex items-center gap-2 text-xs text-gray-400">' +
-          '<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">' + tag + '</span>' +
+          '<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">' + (lead.dormant ? 'Follow-up' : 'Lead') + '</span>' +
           '<span>' + lead.message_count + ' msg' + (lead.message_count !== 1 ? 's' : '') + '</span>' +
         '</div>' +
       '</div>';
     }
 
+    let leadCardsHtml = '';
     if (col.key === 'new' && activeLeads.length > 0) {
       totalCount += activeLeads.length;
-      leadCardsHtml = activeLeads.map(function(lead) {
-        return makeLeadCard(lead, allLeads.indexOf(lead));
-      }).join('');
+      leadCardsHtml = activeLeads.map(function(l) { return makeLeadCard(l, allLeads.indexOf(l)); }).join('');
     }
     if (col.key === 'follow_up' && dormantLeads.length > 0) {
       totalCount += dormantLeads.length;
-      leadCardsHtml = dormantLeads.map(function(lead) {
-        return makeLeadCard(lead, allLeads.indexOf(lead));
-      }).join('');
+      leadCardsHtml = dormantLeads.map(function(l) { return makeLeadCard(l, allLeads.indexOf(l)); }).join('');
     }
 
     div.innerHTML =
@@ -405,7 +377,7 @@ function renderBoard(jobs, leads) {
 
 // ── DETAIL PANEL — JOB ───────────────────────────────────────────────────────
 async function openPanel(jobId) {
-  stopSmsPolling();
+  stopThreadPolling();
   const job = allJobs.find(function(j) { return j.id === jobId; });
   if (!job) return;
   selectedJobId = jobId;
@@ -416,17 +388,14 @@ async function openPanel(jobId) {
   panel.classList.add('panel-open');
 
   document.getElementById('panel-content').innerHTML = renderPanelShell(job);
-
-  const phone = job.customer_phone;
-  await loadSmsThreadByPhone(phone);
-  loadAiSuggestion(job, phone);
   loadTechsForPanel();
-  if (phone) startSmsPolling(phone);
+  loadAiSuggestion(job, job.customer_phone);
+  if (job.customer_phone) startThreadPolling(job.customer_phone);
 }
 
 // ── DETAIL PANEL — LEAD ──────────────────────────────────────────────────────
 async function openLeadPanel(idx) {
-  stopSmsPolling();
+  stopThreadPolling();
   const lead = allLeads[idx];
   if (!lead) return;
   selectedJobId = null;
@@ -436,17 +405,14 @@ async function openLeadPanel(idx) {
   panel.classList.add('panel-open');
 
   document.getElementById('panel-content').innerHTML = renderLeadPanelShell(lead);
-
-  await loadSmsThreadByPhone(lead.phone);
   loadAiSuggestion(null, lead.phone);
-  startSmsPolling(lead.phone);
+  startThreadPolling(lead.phone);
 }
 
 function closePanel() {
-  stopSmsPolling();
-  const panel = document.getElementById('detail-panel');
-  panel.classList.add('panel-closed');
-  panel.classList.remove('panel-open');
+  stopThreadPolling();
+  document.getElementById('detail-panel').classList.add('panel-closed');
+  document.getElementById('detail-panel').classList.remove('panel-open');
   selectedJobId = null;
 }
 
@@ -456,16 +422,14 @@ function statusBadge(status) {
   return '<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full text-white" style="background:' + color + '">' + escHtml(status) + '</span>';
 }
 
-// ── MANUAL SMS SECTION (FIX 5) ───────────────────────────────────────────────
+// ── MANUAL SMS ───────────────────────────────────────────────────────────────
 function renderManualSmsSend(phone) {
-  const safePhone = escHtml(phone || '');
   return '<div class="mb-4 border border-gray-200 rounded-lg p-3">' +
     '<div class="section-label">Send Manual SMS</div>' +
     '<div class="flex gap-2">' +
       '<input id="manual-sms-text" type="text" placeholder="Type message…" ' +
         'class="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">' +
-      '<button onclick="sendManualSms(\'' + safePhone + '\')" ' +
-        'class="action-btn bg-indigo-600 text-white">Send</button>' +
+      '<button onclick="sendManualSms(\'' + escHtml(phone || '') + '\')" class="action-btn bg-indigo-600 text-white">Send</button>' +
     '</div>' +
   '</div>';
 }
@@ -473,8 +437,7 @@ function renderManualSmsSend(phone) {
 async function sendManualSms(phone) {
   if (!phone) { showToast('No phone'); return; }
   const inp = document.getElementById('manual-sms-text');
-  if (!inp) return;
-  const text = inp.value.trim();
+  const text = inp ? inp.value.trim() : '';
   if (!text) { showToast('Message is empty'); return; }
   appendOptimisticMessage(text);
   inp.value = '';
@@ -485,13 +448,11 @@ async function sendManualSms(phone) {
       body: JSON.stringify({ to: phone, message: text }),
     });
     showSuccess('✓ Sent');
-    await loadSmsThreadByPhone(phone);
-  } catch (e) {
-    showToast('Send failed: ' + e.message);
-  }
+    fetchAndRenderThread(phone, false);
+  } catch (e) { showToast('Send failed: ' + e.message); }
 }
 
-// ── LEAD PANEL ────────────────────────────────────────────────────────────────
+// ── LEAD PANEL ───────────────────────────────────────────────────────────────
 function renderLeadPanelShell(lead) {
   const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
   return '' +
@@ -502,30 +463,18 @@ function renderLeadPanelShell(lead) {
       '</div>' +
       '<button onclick="closePanel()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none w-8 h-8 flex items-center justify-center">&times;</button>' +
     '</div>' +
-
     '<div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-700">' +
       'Customer is in concierge flow &mdash; no job created yet.' +
     '</div>' +
-
     renderManualSmsSend(lead.phone) +
-
     '<div class="mb-3">' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">SMS Thread</h3>' +
-      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:240px;min-height:60px;">' +
-        '<div class="text-gray-400 text-xs text-center py-3">Loading&hellip;</div>' +
-      '</div>' +
+      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:240px;min-height:60px;"></div>' +
     '</div>' +
-
     '<div>' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">AI Suggested Reply</h3>' +
-      '<div id="ai-section" class="flex items-center gap-2 text-gray-400 text-xs">' +
-        spinnerSvg() + 'Generating suggestion&hellip;' +
-      '</div>' +
+      '<div id="ai-section" class="flex items-center gap-2 text-gray-400 text-xs">' + spinnerSvg() + 'Generating suggestion&hellip;</div>' +
     '</div>';
-}
-
-function spinnerSvg() {
-  return '<svg class="spin w-4 h-4 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
 }
 
 // ── JOB PANEL ─────────────────────────────────────────────────────────────────
@@ -533,7 +482,6 @@ function renderJobActionsSection(job) {
   const id = escHtml(job.id);
   const phone = escHtml(job.customer_phone || '');
 
-  // Status dropdown
   const statusOpts = ALL_STATUSES.map(function(s) {
     return '<option value="' + s + '"' + (s === job.status ? ' selected' : '') + '>' + s + '</option>';
   }).join('');
@@ -541,7 +489,6 @@ function renderJobActionsSection(job) {
   return '<div class="mb-4 border border-gray-200 rounded-lg p-3 flex flex-col gap-3">' +
     '<div class="section-label">Actions</div>' +
 
-    // Send Manual SMS
     '<div>' +
       '<div class="text-xs text-gray-500 mb-1">Send Manual SMS</div>' +
       '<div class="flex gap-2">' +
@@ -551,7 +498,6 @@ function renderJobActionsSection(job) {
       '</div>' +
     '</div>' +
 
-    // Move status
     '<div>' +
       '<div class="text-xs text-gray-500 mb-1">Move to Status</div>' +
       '<div class="flex gap-2">' +
@@ -560,7 +506,6 @@ function renderJobActionsSection(job) {
       '</div>' +
     '</div>' +
 
-    // Reschedule
     '<div>' +
       '<div class="text-xs text-gray-500 mb-1">Reschedule</div>' +
       '<div class="flex gap-2">' +
@@ -569,7 +514,6 @@ function renderJobActionsSection(job) {
       '</div>' +
     '</div>' +
 
-    // Reassign tech (lazy load)
     '<div>' +
       '<div class="text-xs text-gray-500 mb-1">Reassign Tech</div>' +
       '<div class="flex gap-2">' +
@@ -578,14 +522,12 @@ function renderJobActionsSection(job) {
       '</div>' +
     '</div>' +
 
-    // Quick action buttons
     '<div class="flex gap-2 flex-wrap">' +
       '<button onclick="resendPayment(\'' + id + '\')" class="action-btn bg-green-600 text-white">Resend Payment</button>' +
       '<button onclick="markPaidManual(\'' + id + '\')" class="action-btn bg-green-50 text-green-700" style="border:1px solid #a7f3d0">Mark Paid</button>' +
       '<button onclick="markCompleted(\'' + id + '\')" class="action-btn bg-blue-600 text-white">Mark Completed</button>' +
       '<button onclick="cancelJob(\'' + id + '\')" class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca">Cancel Job</button>' +
     '</div>' +
-
   '</div>';
 }
 
@@ -637,16 +579,12 @@ function renderPanelShell(job) {
 
     '<div class="mb-3">' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">SMS Thread</h3>' +
-      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:240px;min-height:60px;">' +
-        '<div class="text-gray-400 text-xs text-center py-3">Loading&hellip;</div>' +
-      '</div>' +
+      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:240px;min-height:60px;"></div>' +
     '</div>' +
 
     '<div>' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">AI Suggested Reply</h3>' +
-      '<div id="ai-section" class="flex items-center gap-2 text-gray-400 text-xs">' +
-        spinnerSvg() + 'Generating suggestion&hellip;' +
-      '</div>' +
+      '<div id="ai-section" class="flex items-center gap-2 text-gray-400 text-xs">' + spinnerSvg() + 'Generating suggestion&hellip;</div>' +
     '</div>';
 }
 
@@ -655,7 +593,9 @@ async function loadAiSuggestion(job, phone) {
   let msgs = [];
   if (phone) {
     try {
-      msgs = await apiFetch('/api/sms_conversations?phone=eq.' + encodeURIComponent(phone) + '&order=created_at.asc');
+      msgs = await fetch('/api/conversations/' + encodeURIComponent(phone), { cache: 'no-store' })
+        .then(function(r) { return r.json(); })
+        .catch(function() { return []; });
     } catch (_) {}
   }
   try {
@@ -683,7 +623,6 @@ function renderAiSection(suggestion, phone) {
   const safePhone = escHtml(phone || '');
   el.innerHTML =
     '<div class="w-full">' +
-      // Draft preview bubble
       '<div class="flex flex-col items-end mb-2">' +
         '<div class="max-w-xs px-3 py-2 text-sm bubble-draft">' + escHtml(suggestion) + '</div>' +
         '<span class="text-gray-400 text-xs mt-0.5 px-1">AI draft</span>' +
@@ -694,9 +633,7 @@ function renderAiSection(suggestion, phone) {
       '</textarea>' +
       '<div class="flex items-center gap-3 mt-2">' +
         '<button id="send-btn" onclick="sendReplyToPhone(\'' + safePhone + '\')" ' +
-          'class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg transition font-medium disabled:opacity-40 disabled:cursor-default">' +
-          'Send' +
-        '</button>' +
+          'class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg transition font-medium disabled:opacity-40 disabled:cursor-default">Send</button>' +
         '<span id="send-status" class="text-sm text-green-600 hidden">Sent &#10003;</span>' +
       '</div>' +
     '</div>';
@@ -706,8 +643,7 @@ function renderAiSection(suggestion, phone) {
 function updateSendBtn() {
   const btn = document.getElementById('send-btn');
   const ta = document.getElementById('reply-text');
-  if (!btn || !ta) return;
-  btn.disabled = !ta.value.trim();
+  if (btn && ta) btn.disabled = !ta.value.trim();
 }
 
 async function sendReplyToPhone(phone) {
@@ -728,17 +664,12 @@ async function sendReplyToPhone(phone) {
       body: JSON.stringify({ to: phone, message: text }),
     });
     const statusEl = document.getElementById('send-status');
-    if (statusEl) {
-      statusEl.classList.remove('hidden');
-      setTimeout(function() { statusEl.classList.add('hidden'); }, 3000);
-    }
-    await loadSmsThreadByPhone(phone);
-  } catch (e) {
-    showToast('Send failed: ' + e.message);
-  }
+    if (statusEl) { statusEl.classList.remove('hidden'); setTimeout(function() { statusEl.classList.add('hidden'); }, 3000); }
+    fetchAndRenderThread(phone, false);
+  } catch (e) { showToast('Send failed: ' + e.message); }
 }
 
-// ── ACTIONS (FIX 5) ──────────────────────────────────────────────────────────
+// ── ACTIONS ──────────────────────────────────────────────────────────────────
 async function patchJob(jobId, fields) {
   await apiFetch('/api/jobs/' + jobId, {
     method: 'PATCH',
@@ -749,24 +680,19 @@ async function patchJob(jobId, fields) {
 
 async function afterAction(jobId) {
   showSuccess('✓ Done');
-  const [jobs] = await Promise.all([
+  const [jobs, leads] = await Promise.all([
     apiFetch('/jobs?limit=300'),
-    apiFetch('/api/leads').catch(function() { return []; }),
+    apiFetch('/api/leads').catch(function() { return allLeads; }),
   ]);
   allJobs = Array.isArray(jobs) ? jobs : allJobs;
-  const leads = await apiFetch('/api/leads').catch(function() { return allLeads; });
   allLeads = Array.isArray(leads) ? leads : allLeads;
   renderBoard(allJobs, allLeads);
   if (jobId) {
     const job = allJobs.find(function(j) { return j.id === jobId; });
     if (job) {
-      const phone = job.customer_phone;
       document.getElementById('panel-content').innerHTML = renderPanelShell(job);
-      if (phone) {
-        await loadSmsThreadByPhone(phone);
-        loadTechsForPanel();
-        startSmsPolling(phone);
-      }
+      loadTechsForPanel();
+      if (job.customer_phone) fetchAndRenderThread(job.customer_phone, false);
     }
   }
 }
@@ -785,38 +711,27 @@ async function loadTechsForPanel() {
 async function moveToStatus(jobId) {
   const sel = document.getElementById('status-select');
   if (!sel) return;
-  const newStatus = sel.value;
-  try {
-    await patchJob(jobId, { status: newStatus });
-    await afterAction(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
+  try { await patchJob(jobId, { status: sel.value }); await afterAction(jobId); }
+  catch (e) { showToast('Error: ' + e.message); }
 }
 
 async function confirmReschedule(jobId) {
   const input = document.getElementById('reschedule-input');
   if (!input || !input.value) { showToast('Pick a date/time'); return; }
-  const isoTime = new Date(input.value).toISOString();
   try {
-    await patchJob(jobId, { preferred_time: isoTime, scheduled_time: isoTime, status: 'awaiting_time_confirm' });
+    await patchJob(jobId, { preferred_time: new Date(input.value).toISOString(), scheduled_time: new Date(input.value).toISOString(), status: 'awaiting_time_confirm' });
     await afterAction(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
+  } catch (e) { showToast('Error: ' + e.message); }
 }
 
 async function confirmReassign(jobId) {
   const sel = document.getElementById('reassign-select');
   if (!sel || !sel.value) { showToast('Select a tech'); return; }
-  const techId = sel.value;
   const techName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text.split(' (')[0] : '';
   try {
-    await patchJob(jobId, { confirmed_tech_id: techId, confirmed_tech_name: techName, status: 'awaiting_tech_reply' });
+    await patchJob(jobId, { confirmed_tech_id: sel.value, confirmed_tech_name: techName, status: 'awaiting_tech_reply' });
     await afterAction(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
+  } catch (e) { showToast('Error: ' + e.message); }
 }
 
 async function resendPayment(jobId) {
@@ -824,39 +739,25 @@ async function resendPayment(jobId) {
     await apiFetch('/api/jobs/' + jobId + '/resend-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     showSuccess('✓ Payment link resent');
   } catch (e) {
-    if (e.message.includes('404') || e.message.includes('Not Found')) {
-      showToast('not wired — send payment link manually via SMS');
-    } else {
-      showToast('Error: ' + e.message);
-    }
+    showToast(e.message.includes('404') || e.message.includes('Not Found') ? 'not wired — send payment link manually via SMS' : 'Error: ' + e.message);
   }
 }
 
 async function markPaidManual(jobId) {
-  try {
-    await patchJob(jobId, { paid_at: new Date().toISOString(), status: 'confirmed' });
-    await afterAction(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
+  try { await patchJob(jobId, { paid_at: new Date().toISOString(), status: 'confirmed' }); await afterAction(jobId); }
+  catch (e) { showToast('Error: ' + e.message); }
 }
 
 async function markCompleted(jobId) {
   try {
     await apiFetch('/jobs/' + jobId + '/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     await afterAction(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
+  } catch (e) { showToast('Error: ' + e.message); }
 }
 
 async function cancelJob(jobId) {
-  try {
-    await patchJob(jobId, { status: 'cancelled', cancelled_at: new Date().toISOString() });
-    await afterAction(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
+  try { await patchJob(jobId, { status: 'cancelled', cancelled_at: new Date().toISOString() }); await afterAction(jobId); }
+  catch (e) { showToast('Error: ' + e.message); }
 }
 
 // ── REFRESH ───────────────────────────────────────────────────────────────────
@@ -872,16 +773,11 @@ async function refreshBoard() {
     document.getElementById('last-updated').textContent =
       'Updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     await checkKillSwitch();
-  } catch (e) {
-    showToast('Refresh failed: ' + e.message);
-  }
+  } catch (e) { showToast('Refresh failed: ' + e.message); }
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
-refreshBoard().then(function() {
-  // Load techs into any open panel after board loads
-  loadTechsForPanel();
-});
+refreshBoard();
 startBoardAutoRefresh();
 </script>
 </body>
