@@ -1,12 +1,13 @@
 const { google } = require('googleapis');
 
-function getCalendarClient() {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-  oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
-  return google.calendar({ version: 'v3', auth: oauth2Client });
+async function getCalendarClient() {
+  const serviceAccountKey = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  const auth = new google.auth.GoogleAuth({
+    credentials: serviceAccountKey,
+    scopes: ['https://www.googleapis.com/auth/calendar'],
+  });
+  const authClient = await auth.getClient();
+  return google.calendar({ version: 'v3', auth: authClient });
 }
 
 /**
@@ -147,7 +148,7 @@ function getChicagoUTCOffsetMinutes(date) {
 }
 
 async function isTimeAvailable(startTime, durationMinutes = 90) {
-  const calendar = getCalendarClient();
+  const calendar = await getCalendarClient();
   const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000);
   const response = await calendar.freebusy.query({
     requestBody: {
@@ -161,7 +162,7 @@ async function isTimeAvailable(startTime, durationMinutes = 90) {
 }
 
 async function createJobEvent(job, startTime) {
-  const calendar = getCalendarClient();
+  const calendar = await getCalendarClient();
   const endTime = new Date(startTime.getTime() + 90 * 60 * 1000);
   const event = await calendar.events.insert({
     calendarId: process.env.GOOGLE_CALENDAR_ID,
@@ -178,7 +179,7 @@ async function createJobEvent(job, startTime) {
 }
 
 async function confirmJobEvent(eventId, techName) {
-  const calendar = getCalendarClient();
+  const calendar = await getCalendarClient();
   await calendar.events.patch({
     calendarId: process.env.GOOGLE_CALENDAR_ID,
     eventId,
@@ -187,7 +188,7 @@ async function confirmJobEvent(eventId, techName) {
 }
 
 async function deleteJobEvent(eventId) {
-  const calendar = getCalendarClient();
+  const calendar = await getCalendarClient();
   await calendar.events.delete({ calendarId: process.env.GOOGLE_CALENDAR_ID, eventId });
   console.log(`[Calendar] Event deleted: ${eventId}`);
 }
