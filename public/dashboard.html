@@ -469,7 +469,7 @@ function renderLeadPanelShell(lead) {
     '</div>' +
     '<div class="mb-4 border border-gray-200 rounded-lg p-3 flex flex-col gap-2">' +
       '<div class="section-label">Actions</div>' +
-      '<button onclick="moveLeadToScheduling(\'' + safePhone + '\')" class="action-btn bg-purple-600 text-white w-full">Move to Scheduling</button>' +
+      '<button id="move-to-sched-btn" onclick="moveLeadToScheduling(\'' + safePhone + '\')" class="action-btn bg-blue-600 text-white w-full">Move to Scheduling</button>' +
     '</div>' +
     renderManualSmsSend(lead.phone) +
     '<div class="mb-3">' +
@@ -626,15 +626,26 @@ function renderAiSection(suggestion, phone) {
   const el = document.getElementById('ai-section');
   if (!el) return;
   const safePhone = escHtml(phone || '');
+  const safeSuggestion = escHtml(suggestion);
+  // Store suggestion on window so inline handlers can reach it
+  window._aiSuggestion = suggestion;
+  window._aiPhone = phone;
   el.innerHTML =
     '<div class="w-full">' +
       '<div class="flex flex-col items-end mb-2">' +
-        '<div class="max-w-xs px-3 py-2 text-sm bubble-draft">' + escHtml(suggestion) + '</div>' +
-        '<span class="text-gray-400 text-xs mt-0.5 px-1">AI draft</span>' +
+        '<div class="max-w-xs px-3 py-2 text-sm bubble-draft cursor-pointer hover:opacity-90 active:opacity-70" ' +
+            'onclick="sendSuggestionDirectly()" title="Click to send this message">' +
+          safeSuggestion +
+        '</div>' +
+        '<div class="flex items-center gap-3 mt-0.5 px-1">' +
+          '<span class="text-indigo-400 text-xs">Click to send &rarr;</span>' +
+          '<button onclick="editSuggestion()" class="text-gray-400 hover:text-gray-600 text-xs underline">Edit</button>' +
+        '</div>' +
       '</div>' +
       '<textarea id="reply-text" oninput="updateSendBtn()" ' +
-        'class="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300" rows="3">' +
-        escHtml(suggestion) +
+        'class="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300" rows="3" ' +
+        'placeholder="Edit suggestion or type a message…">' +
+        safeSuggestion +
       '</textarea>' +
       '<div class="flex items-center gap-3 mt-2">' +
         '<button id="send-btn" onclick="sendReplyToPhone(\'' + safePhone + '\')" ' +
@@ -643,6 +654,37 @@ function renderAiSection(suggestion, phone) {
       '</div>' +
     '</div>';
   updateSendBtn();
+}
+
+async function sendSuggestionDirectly() {
+  const phone = window._aiPhone;
+  const suggestion = window._aiSuggestion;
+  if (!phone || !suggestion) { showToast('Nothing to send'); return; }
+  appendOptimisticMessage(suggestion);
+  window._aiSuggestion = null;
+  const bubble = document.querySelector('#ai-section .bubble-draft');
+  if (bubble) { bubble.style.pointerEvents = 'none'; bubble.style.opacity = '0.5'; }
+  try {
+    await apiFetch('/admin/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Source': 'dashboard' },
+      body: JSON.stringify({ to: phone, message: suggestion }),
+    });
+    const statusEl = document.getElementById('send-status');
+    if (statusEl) { statusEl.classList.remove('hidden'); setTimeout(function() { statusEl.classList.add('hidden'); }, 2000); }
+    const ta = document.getElementById('reply-text');
+    if (ta) { ta.value = ''; updateSendBtn(); }
+    fetchAndRenderThread(phone, false);
+  } catch (e) { showToast('Send failed: ' + e.message); }
+}
+
+function editSuggestion() {
+  const ta = document.getElementById('reply-text');
+  if (ta && window._aiSuggestion) {
+    ta.value = window._aiSuggestion;
+    ta.focus();
+    updateSendBtn();
+  }
 }
 
 function updateSendBtn() {
@@ -767,24 +809,23 @@ async function cancelJob(jobId) {
 
 // ── LEAD → SCHEDULING ────────────────────────────────────────────────────────
 async function moveLeadToScheduling(phone) {
+  const btn = document.getElementById('move-to-sched-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
   try {
-    const data = await apiFetch('/api/jobs/create-manual', {
+    await apiFetch('/api/jobs/create-manual', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         phone: phone,
         name: phone,
         city: 'Unknown',
-        preferred_time: null,
+        preferred_time: 'TBD',
         num_tvs: 1,
         total_price: 0,
-        tv_1_size: null,
-        tv_1_mount: null,
-        tv_1_wall: null,
-        tv_1_wire: null,
       }),
     });
     showSuccess('Job created — moved to Scheduling');
+    closePanel();
     const [jobs, leads] = await Promise.all([
       apiFetch('/jobs?limit=300'),
       apiFetch('/api/leads').catch(function() { return allLeads; }),
@@ -792,9 +833,9 @@ async function moveLeadToScheduling(phone) {
     allJobs = Array.isArray(jobs) ? jobs : allJobs;
     allLeads = Array.isArray(leads) ? leads : allLeads;
     renderBoard(allJobs, allLeads);
-    if (data.id) openPanel(data.id);
   } catch (e) {
     showToast('Error: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Move to Scheduling'; }
   }
 }
 
