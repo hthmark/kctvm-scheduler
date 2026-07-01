@@ -94,7 +94,10 @@ function colKey(status) {
 }
 
 let allJobs = [];
+let allLeads = [];
 let selectedJobId = null;
+let smsPollingInterval = null;
+let currentPanelPhone = null;
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
 function timeAgo(iso) {
@@ -129,13 +132,13 @@ function showToast(msg, dur) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), dur);
+  setTimeout(function() { t.classList.remove('show'); }, dur);
 }
 
 async function apiFetch(path, opts) {
   const r = await fetch(path, opts || {});
   if (!r.ok) {
-    const err = await r.json().catch(() => ({}));
+    const err = await r.json().catch(function() { return {}; });
     throw new Error(err.error || r.statusText);
   }
   return r.json();
@@ -148,6 +151,53 @@ function countTvs(job) {
     if (s && s !== 'null' && s !== 'undefined') n++;
   }
   return n || 1;
+}
+
+// ── SMS POLLING ───────────────────────────────────────────────────────────────
+function startSmsPolling(phone) {
+  stopSmsPolling();
+  currentPanelPhone = phone;
+  smsPollingInterval = setInterval(function() {
+    loadSmsThreadByPhone(phone);
+  }, 5000);
+}
+
+function stopSmsPolling() {
+  if (smsPollingInterval) {
+    clearInterval(smsPollingInterval);
+    smsPollingInterval = null;
+  }
+  currentPanelPhone = null;
+}
+
+async function loadSmsThreadByPhone(phone) {
+  const el = document.getElementById('sms-thread');
+  if (!el || !phone) return;
+  try {
+    const msgs = await apiFetch('/api/sms_conversations?phone=eq.' + encodeURIComponent(phone) + '&order=created_at.asc');
+    renderSmsThread(msgs);
+  } catch (_) {}
+}
+
+function renderSmsThread(msgs) {
+  const el = document.getElementById('sms-thread');
+  if (!el) return;
+  if (!msgs || msgs.length === 0) {
+    el.innerHTML = '<div class="text-gray-400 text-xs text-center py-3">No messages yet</div>';
+    return;
+  }
+  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 20;
+  el.innerHTML = msgs.map(function(m) {
+    const isUser = m.role === 'user';
+    const ts = m.created_at
+      ? new Date(m.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      : '';
+    return '<div class="flex flex-col ' + (isUser ? 'items-start' : 'items-end') + '">' +
+      '<div class="max-w-xs px-3 py-2 text-sm ' + (isUser ? 'bubble-user text-gray-800' : 'bubble-assistant') + '">' + escHtml(m.content || '') + '</div>' +
+      '<span class="text-gray-400 text-xs mt-0.5 px-1">' + ts + '</span>' +
+    '</div>';
+  }).join('');
+  if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
 // ── KILL SWITCH ──────────────────────────────────────────────────────────────
@@ -173,7 +223,7 @@ async function checkKillSwitch() {
 }
 
 // ── BOARD ─────────────────────────────────────────────────────────────────────
-function renderBoard(jobs) {
+function renderBoard(jobs, leads) {
   const board = document.getElementById('board');
   const byCol = {};
   COLUMNS.forEach(function(c) { byCol[c.key] = []; });
@@ -189,6 +239,7 @@ function renderBoard(jobs) {
     const div = document.createElement('div');
     div.className = 'board-col flex-none flex flex-col gap-2';
 
+    // Job cards
     let cardsHtml = colJobs.map(function(j) {
       const techName = j.confirmed_tech_name || j.current_tech_name || null;
       const tvs = j.num_tvs || countTvs(j);
@@ -209,20 +260,42 @@ function renderBoard(jobs) {
       '</div>';
     }).join('');
 
+    // Lead cards (only in New column)
+    let leadCardsHtml = '';
+    let totalCount = colJobs.length;
+    if (col.key === 'new' && leads && leads.length > 0) {
+      totalCount += leads.length;
+      leadCardsHtml = leads.map(function(lead, idx) {
+        const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
+        const preview = lead.last_message ? lead.last_message.slice(0, 60) + (lead.last_message.length > 60 ? '…' : '') : '';
+        return '<div class="bg-white rounded-lg shadow-sm p-3 cursor-pointer hover:shadow-md transition border-l-4" style="border-left-color:#9ca3af;opacity:0.9" onclick="openLeadPanel(' + idx + ')">' +
+          '<div class="flex items-center justify-between mb-1">' +
+            '<span class="font-semibold text-gray-600 text-sm font-mono">' + escHtml(lead.phone) + '</span>' +
+            '<span class="text-gray-400 text-xs">' + ago + '</span>' +
+          '</div>' +
+          '<div class="text-gray-500 text-xs mb-1 truncate">' + escHtml(preview) + '</div>' +
+          '<div class="flex items-center gap-2 text-xs text-gray-400">' +
+            '<span class="bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded text-xs">Lead</span>' +
+            '<span>' + lead.message_count + ' msg' + (lead.message_count !== 1 ? 's' : '') + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
     div.innerHTML =
       '<div class="rounded-lg px-3 py-2 flex items-center justify-between mb-1" style="background:' + col.hdr + ';border-top:3px solid ' + col.color + '">' +
         '<span class="font-semibold text-gray-700 text-sm">' + col.label + '</span>' +
-        '<span class="text-xs font-bold px-2 py-0.5 rounded-full text-white" style="background:' + col.color + '">' + colJobs.length + '</span>' +
+        '<span class="text-xs font-bold px-2 py-0.5 rounded-full text-white" style="background:' + col.color + '">' + totalCount + '</span>' +
       '</div>' +
       '<div class="flex flex-col gap-2 overflow-y-auto pr-0.5" style="max-height:calc(100vh - 130px)">' +
-        (cardsHtml || '<div class="text-gray-400 text-xs text-center py-4">Empty</div>') +
+        (cardsHtml + leadCardsHtml || '<div class="text-gray-400 text-xs text-center py-4">Empty</div>') +
       '</div>';
 
     board.appendChild(div);
   });
 }
 
-// ── DETAIL PANEL ─────────────────────────────────────────────────────────────
+// ── DETAIL PANEL — JOB ───────────────────────────────────────────────────────
 async function openPanel(jobId) {
   const job = allJobs.find(function(j) { return j.id === jobId; });
   if (!job) return;
@@ -234,11 +307,31 @@ async function openPanel(jobId) {
 
   document.getElementById('panel-content').innerHTML = renderPanelShell(job);
 
-  loadSmsThread(job);
-  loadAiSuggestion(job);
+  const phone = job.customer_phone;
+  await loadSmsThreadByPhone(phone);
+  loadAiSuggestion(job, phone);
+  if (phone) startSmsPolling(phone);
+}
+
+// ── DETAIL PANEL — LEAD ──────────────────────────────────────────────────────
+async function openLeadPanel(idx) {
+  const lead = allLeads[idx];
+  if (!lead) return;
+  selectedJobId = null;
+
+  const panel = document.getElementById('detail-panel');
+  panel.classList.remove('panel-closed');
+  panel.classList.add('panel-open');
+
+  document.getElementById('panel-content').innerHTML = renderLeadPanelShell(lead);
+
+  await loadSmsThreadByPhone(lead.phone);
+  loadAiSuggestion(null, lead.phone);
+  startSmsPolling(lead.phone);
 }
 
 function closePanel() {
+  stopSmsPolling();
   const panel = document.getElementById('detail-panel');
   panel.classList.add('panel-closed');
   panel.classList.remove('panel-open');
@@ -249,6 +342,37 @@ function statusBadge(status) {
   const col = COLUMNS.find(function(c) { return c.key === colKey(status); });
   const color = col ? col.color : '#6b7280';
   return '<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full text-white" style="background:' + color + '">' + escHtml(status) + '</span>';
+}
+
+function renderLeadPanelShell(lead) {
+  const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
+  return '' +
+    '<div class="flex items-center justify-between mb-4">' +
+      '<div>' +
+        '<h2 class="font-bold text-gray-800 text-base font-mono">' + escHtml(lead.phone) + '</h2>' +
+        '<span class="text-xs text-gray-400">Inbound lead &middot; ' + lead.message_count + ' messages &middot; ' + ago + '</span>' +
+      '</div>' +
+      '<button onclick="closePanel()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none w-8 h-8 flex items-center justify-center">&times;</button>' +
+    '</div>' +
+
+    '<div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-700">' +
+      'No job created yet — customer is mid-concierge flow.' +
+    '</div>' +
+
+    '<div class="mb-3">' +
+      '<h3 class="font-semibold text-gray-700 text-sm mb-2">SMS Thread</h3>' +
+      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:280px;min-height:60px;">' +
+        '<div class="text-gray-400 text-xs text-center py-3">Loading&hellip;</div>' +
+      '</div>' +
+    '</div>' +
+
+    '<div>' +
+      '<h3 class="font-semibold text-gray-700 text-sm mb-2">AI Suggested Reply</h3>' +
+      '<div id="ai-section" class="flex items-center gap-2 text-gray-400 text-xs">' +
+        '<svg class="spin w-4 h-4 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>' +
+        'Generating suggestion&hellip;' +
+      '</div>' +
+    '</div>';
 }
 
 function renderPanelShell(job) {
@@ -327,44 +451,7 @@ function renderPanelShell(job) {
     '</div>';
 }
 
-async function loadSmsThread(job) {
-  const phone = job.customer_phone;
-  const el = document.getElementById('sms-thread');
-  if (!el) return;
-  if (!phone) {
-    el.innerHTML = '<div class="text-gray-400 text-xs text-center py-3">No phone number</div>';
-    return;
-  }
-  try {
-    const msgs = await apiFetch('/api/sms_conversations?phone=eq.' + encodeURIComponent(phone) + '&order=created_at.asc');
-    renderSmsThread(msgs);
-  } catch (e) {
-    if (el) el.innerHTML = '<div class="text-red-400 text-xs text-center py-3">Error loading messages</div>';
-  }
-}
-
-function renderSmsThread(msgs) {
-  const el = document.getElementById('sms-thread');
-  if (!el) return;
-  if (!msgs || msgs.length === 0) {
-    el.innerHTML = '<div class="text-gray-400 text-xs text-center py-3">No messages yet</div>';
-    return;
-  }
-  el.innerHTML = msgs.map(function(m) {
-    const isUser = m.role === 'user';
-    const ts = m.created_at
-      ? new Date(m.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-      : '';
-    return '<div class="flex flex-col ' + (isUser ? 'items-start' : 'items-end') + '">' +
-      '<div class="max-w-xs px-3 py-2 text-sm ' + (isUser ? 'bubble-user text-gray-800' : 'bubble-assistant') + '">' + escHtml(m.content || '') + '</div>' +
-      '<span class="text-gray-400 text-xs mt-0.5 px-1">' + ts + '</span>' +
-    '</div>';
-  }).join('');
-  el.scrollTop = el.scrollHeight;
-}
-
-async function loadAiSuggestion(job) {
-  const phone = job.customer_phone;
+async function loadAiSuggestion(job, phone) {
   let msgs = [];
   if (phone) {
     try {
@@ -375,31 +462,31 @@ async function loadAiSuggestion(job) {
     const data = await apiFetch('/api/dashboard/suggest-reply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job: job, messages: msgs }),
+      body: JSON.stringify({ job: job || null, messages: msgs }),
     });
-    renderAiSection(data.suggestion || '', job);
+    renderAiSection(data.suggestion || '', phone);
   } catch (e) {
     const el = document.getElementById('ai-section');
     if (el) el.innerHTML = '<div class="text-red-400 text-xs">Could not generate suggestion: ' + escHtml(e.message) + '</div>';
   }
 }
 
-function renderAiSection(suggestion, job) {
+function renderAiSection(suggestion, phone) {
   const el = document.getElementById('ai-section');
   if (!el) return;
+  const safePhone = escHtml(phone || '');
   el.innerHTML =
     '<div class="w-full">' +
       '<textarea id="reply-text" class="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300" rows="4">' + escHtml(suggestion) + '</textarea>' +
       '<div class="flex items-center gap-3 mt-2">' +
-        '<button onclick="sendReply(\'' + job.id + '\')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg transition font-medium">Send</button>' +
+        '<button onclick="sendReplyToPhone(\'' + safePhone + '\')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg transition font-medium">Send</button>' +
         '<span id="send-status" class="text-sm text-green-600 hidden">Sent &#10003;</span>' +
       '</div>' +
     '</div>';
 }
 
-async function sendReply(jobId) {
-  const job = allJobs.find(function(j) { return j.id === jobId; });
-  if (!job) return;
+async function sendReplyToPhone(phone) {
+  if (!phone) { showToast('No phone number'); return; }
   const textarea = document.getElementById('reply-text');
   if (!textarea) return;
   const text = textarea.value.trim();
@@ -409,14 +496,14 @@ async function sendReply(jobId) {
     await apiFetch('/admin/send-sms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Source': 'dashboard' },
-      body: JSON.stringify({ to: job.customer_phone, message: text }),
+      body: JSON.stringify({ to: phone, message: text }),
     });
-    const status = document.getElementById('send-status');
-    if (status) {
-      status.classList.remove('hidden');
-      setTimeout(function() { status.classList.add('hidden'); }, 3000);
+    const statusEl = document.getElementById('send-status');
+    if (statusEl) {
+      statusEl.classList.remove('hidden');
+      setTimeout(function() { statusEl.classList.add('hidden'); }, 3000);
     }
-    await loadSmsThread(job);
+    await loadSmsThreadByPhone(phone);
   } catch (e) {
     showToast('Send failed: ' + e.message);
   }
@@ -447,9 +534,13 @@ async function resendPayment(jobId) {
 // ── REFRESH ───────────────────────────────────────────────────────────────────
 async function refreshBoard() {
   try {
-    const jobs = await apiFetch('/jobs?limit=300');
+    const [jobs, leads] = await Promise.all([
+      apiFetch('/jobs?limit=300'),
+      apiFetch('/api/leads').catch(function() { return []; }),
+    ]);
     allJobs = Array.isArray(jobs) ? jobs : [];
-    renderBoard(allJobs);
+    allLeads = Array.isArray(leads) ? leads : [];
+    renderBoard(allJobs, allLeads);
     document.getElementById('last-updated').textContent =
       'Updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     await checkKillSwitch();
