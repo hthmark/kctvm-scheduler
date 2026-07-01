@@ -68,6 +68,8 @@ router.get('/leads', async (req, res) => {
     const { createClient } = require('@supabase/supabase-js');
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+    const EXCLUDED_PHONES = new Set(['+18162032001']);
+
     const [{ data: jobRows }, { data: msgs }] = await Promise.all([
       supabase.from('jobs').select('customer_phone').not('customer_phone', 'is', null),
       supabase.from('sms_conversations').select('phone, content, created_at, role').order('created_at', { ascending: false }),
@@ -77,7 +79,7 @@ router.get('/leads', async (req, res) => {
 
     const byPhone = {};
     for (const msg of (msgs || [])) {
-      if (!msg.phone || jobPhoneSet.has(msg.phone)) continue;
+      if (!msg.phone || jobPhoneSet.has(msg.phone) || EXCLUDED_PHONES.has(msg.phone)) continue;
       if (!byPhone[msg.phone]) {
         byPhone[msg.phone] = { phone: msg.phone, last_message_at: msg.created_at, last_message: msg.content, message_count: 0 };
       }
