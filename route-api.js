@@ -45,8 +45,12 @@ Return ONLY the message text, nothing else — no labels, no quotes, no explanat
       messages: history.length > 0 ? history : [{ role: 'user', content: 'Hello' }],
     });
 
-    const suggestion = response.content[0]?.text || '';
-    console.log('[SuggestReply] Generated suggestion:', suggestion);
+    const content = response.content;
+    console.log('[SuggestReply] Raw content blocks:', JSON.stringify(content));
+    const textBlock = Array.isArray(content) ? content.find(function(b) { return b.type === 'text'; }) : null;
+    const suggestion = textBlock ? textBlock.text.trim() : '';
+    console.log('[SuggestReply] Text blocks found:', content && content.map(function(b) { return b.type; }));
+    console.log('[SuggestReply] Generated suggestion:', suggestion || '(EMPTY — no text block found)');
     res.json({ suggestion });
   } catch (e) {
     console.error('[SuggestReply] Anthropic API error:', e);
@@ -98,6 +102,20 @@ router.get('/system-status', async (req, res) => {
     const resp = await axios.get(url, { headers: sbHeaders });
     const row = resp.data?.[0];
     res.json({ enabled: row?.value !== 'false' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/system-status/toggle', async (req, res) => {
+  try {
+    const getUrl = `${SUPABASE_URL}/rest/v1/system_settings?key=eq.system_enabled&select=value`;
+    const current = await axios.get(getUrl, { headers: sbHeaders });
+    const currentEnabled = current.data?.[0]?.value !== 'false';
+    const newEnabled = !currentEnabled;
+    const patchUrl = `${SUPABASE_URL}/rest/v1/system_settings?key=eq.system_enabled`;
+    await axios.patch(patchUrl, { value: newEnabled ? 'true' : 'false' }, { headers: sbHeaders });
+    res.json({ ok: true, enabled: newEnabled });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

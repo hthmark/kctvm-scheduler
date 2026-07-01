@@ -24,15 +24,22 @@
     .card-border-cancelled             { border-left: 4px solid #ef4444; }
     .bubble-user      { background: #f1f5f9; border-radius: 12px 12px 12px 2px; align-self: flex-start; }
     .bubble-assistant { background: #1e40af; color: #fff; border-radius: 12px 12px 2px 12px; align-self: flex-end; }
+    .bubble-draft     { background: #4f46e5; color: #fff; border-radius: 12px 12px 2px 12px; align-self: flex-end; opacity: 0.85; }
     .panel-open   { transform: translateX(0); }
     .panel-closed { transform: translateX(100%); }
     .spin { animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
     .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1e293b; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
     .toast.show { opacity: 1; }
+    .toast.success { background: #15803d; }
     .action-btn { font-size: 13px; padding: 6px 14px; border-radius: 6px; cursor: pointer; transition: opacity 0.2s; border: none; }
     .action-btn:hover:not(:disabled) { opacity: 0.8; }
     .action-btn:disabled { opacity: 0.5; cursor: default; }
+    .ks-btn { cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); transition: background 0.2s; }
+    .ks-btn:hover { background: rgba(255,255,255,0.08); }
+    .section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 6px; }
   </style>
 </head>
 <body class="h-screen overflow-hidden flex flex-col">
@@ -43,19 +50,27 @@
     <span class="font-bold text-lg tracking-tight">KCTVM Ops</span>
     <span class="text-gray-500 text-sm">Dashboard</span>
   </div>
-  <div class="flex items-center gap-2 text-sm">
+
+  <!-- Kill switch toggle button -->
+  <button id="ks-btn" onclick="toggleKillSwitch()" class="ks-btn" title="Click to toggle system on/off">
     <div id="ks-dot" class="w-2.5 h-2.5 rounded-full bg-gray-500"></div>
     <span id="ks-label" class="text-gray-400 text-sm">Checking...</span>
-  </div>
+  </button>
+
   <div class="flex items-center gap-3">
+    <div class="flex items-center gap-1.5">
+      <div class="w-2 h-2 rounded-full bg-green-400 pulse-dot"></div>
+      <span class="text-green-400 text-xs font-medium">live</span>
+      <span id="next-refresh" class="text-gray-500 text-xs ml-1"></span>
+    </div>
     <span id="last-updated" class="text-gray-500 text-xs"></span>
     <button onclick="refreshBoard()" class="bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-1.5 rounded-md transition">&#8635; Refresh</button>
   </div>
 </header>
 
-<!-- Kill switch banner -->
+<!-- System paused banner -->
 <div id="ks-banner" class="hidden bg-red-600 text-white text-center text-sm py-2 font-medium shrink-0">
-  &#9888; SYSTEM KILL SWITCH IS ON &mdash; AI responses paused
+  &#9888; SYSTEM PAUSED &mdash; Automated flows are disabled. Manual actions only.
 </div>
 
 <!-- Board + Panel wrapper -->
@@ -69,7 +84,7 @@
   <!-- Detail panel -->
   <div id="detail-panel"
        class="absolute top-0 right-0 h-full bg-white border-l border-gray-200 shadow-2xl overflow-y-auto transition-transform duration-300 panel-closed"
-       style="width:420px;">
+       style="width:440px;">
     <div id="panel-content" class="p-5 min-h-full"></div>
   </div>
 </div>
@@ -90,6 +105,11 @@ const COLUMNS = [
   { key: 'cancelled',             label: 'Cancelled / No Tech',   color: '#ef4444', hdr: '#fef2f2' },
 ];
 
+const ALL_STATUSES = [
+  'new','scheduling','awaiting_time_confirm','awaiting_payment',
+  'tech_search','awaiting_tech_reply','confirmed','completed','cancelled',
+];
+
 function colKey(status) {
   if (status === 'no_tech_available') return 'cancelled';
   if (status === 'scheduling_conflict') return 'scheduling';
@@ -99,8 +119,13 @@ function colKey(status) {
 let allJobs = [];
 let allLeads = [];
 let selectedJobId = null;
-let smsPollingInterval = null;
 let currentPanelPhone = null;
+let lastThreadMsgCount = 0;
+let lastThreadTimestamp = '';
+
+// FIX 3: auto-refresh state
+const BOARD_REFRESH_MS = 15000;
+let nextRefreshAt = 0;
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
 function timeAgo(iso) {
@@ -130,13 +155,16 @@ function escHtml(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function showToast(msg, dur) {
+function showToast(msg, isSuccess, dur) {
   dur = dur || 3000;
   const t = document.getElementById('toast');
   t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(function() { t.classList.remove('show'); }, dur);
+  t.className = 'toast show' + (isSuccess ? ' success' : '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function() { t.classList.remove('show'); }, dur);
 }
+
+function showSuccess(msg) { showToast(msg, true, 2000); }
 
 async function apiFetch(path, opts) {
   const r = await fetch(path, opts || {});
@@ -156,21 +184,75 @@ function countTvs(job) {
   return n || 1;
 }
 
-// ── SMS POLLING ───────────────────────────────────────────────────────────────
+// ── KILL SWITCH (FIX 1) ──────────────────────────────────────────────────────
+function applyKillSwitchState(enabled) {
+  const dot = document.getElementById('ks-dot');
+  const lbl = document.getElementById('ks-label');
+  const banner = document.getElementById('ks-banner');
+  if (enabled) {
+    dot.className = 'w-2.5 h-2.5 rounded-full bg-green-400';
+    lbl.textContent = 'System ON';
+    lbl.className = 'text-green-400 text-sm';
+    banner.classList.add('hidden');
+  } else {
+    dot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+    lbl.textContent = 'System PAUSED';
+    lbl.className = 'text-red-400 text-sm';
+    banner.classList.remove('hidden');
+  }
+}
+
+async function checkKillSwitch() {
+  try {
+    const data = await apiFetch('/api/system-status');
+    applyKillSwitchState(data.enabled);
+  } catch (_) {}
+}
+
+async function toggleKillSwitch() {
+  try {
+    const data = await apiFetch('/api/system-status/toggle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    });
+    applyKillSwitchState(data.enabled);
+    showToast(data.enabled ? 'System enabled' : 'System PAUSED', data.enabled);
+  } catch (e) {
+    showToast('Kill switch error: ' + e.message);
+  }
+}
+
+// ── SMS THREAD POLLING (FIX 4) ───────────────────────────────────────────────
 function startSmsPolling(phone) {
   stopSmsPolling();
   currentPanelPhone = phone;
-  smsPollingInterval = setInterval(function() {
-    loadSmsThreadByPhone(phone);
+  lastThreadMsgCount = 0;
+  lastThreadTimestamp = '';
+  window.threadPollInterval = setInterval(function() {
+    pollSmsThread(phone);
   }, 5000);
 }
 
 function stopSmsPolling() {
-  if (smsPollingInterval) {
-    clearInterval(smsPollingInterval);
-    smsPollingInterval = null;
+  if (window.threadPollInterval) {
+    clearInterval(window.threadPollInterval);
+    window.threadPollInterval = null;
   }
   currentPanelPhone = null;
+}
+
+async function pollSmsThread(phone) {
+  const el = document.getElementById('sms-thread');
+  if (!el || !phone) return;
+  try {
+    const msgs = await apiFetch('/api/sms_conversations?phone=eq.' + encodeURIComponent(phone) + '&order=created_at.asc');
+    const newCount = msgs ? msgs.length : 0;
+    const newTs = msgs && msgs.length ? (msgs[msgs.length - 1].created_at || '') : '';
+    if (newCount !== lastThreadMsgCount || newTs !== lastThreadTimestamp) {
+      lastThreadMsgCount = newCount;
+      lastThreadTimestamp = newTs;
+      renderSmsThread(msgs);
+    }
+  } catch (_) {}
 }
 
 async function loadSmsThreadByPhone(phone) {
@@ -178,6 +260,8 @@ async function loadSmsThreadByPhone(phone) {
   if (!el || !phone) return;
   try {
     const msgs = await apiFetch('/api/sms_conversations?phone=eq.' + encodeURIComponent(phone) + '&order=created_at.asc');
+    lastThreadMsgCount = msgs ? msgs.length : 0;
+    lastThreadTimestamp = msgs && msgs.length ? (msgs[msgs.length - 1].created_at || '') : '';
     renderSmsThread(msgs);
   } catch (_) {}
 }
@@ -214,31 +298,25 @@ function appendOptimisticMessage(text) {
     '<span class="text-gray-400 text-xs mt-0.5 px-1">' + ts + ' (sending…)</span>';
   el.appendChild(bubble);
   el.scrollTop = el.scrollHeight;
+  lastThreadMsgCount++;
 }
 
-// ── KILL SWITCH ──────────────────────────────────────────────────────────────
-async function checkKillSwitch() {
-  try {
-    const data = await apiFetch('/api/system-status');
-    const enabled = data.enabled;
-    const dot = document.getElementById('ks-dot');
-    const lbl = document.getElementById('ks-label');
-    const banner = document.getElementById('ks-banner');
-    if (enabled) {
-      dot.className = 'w-2.5 h-2.5 rounded-full bg-green-400';
-      lbl.textContent = 'System ON';
-      lbl.className = 'text-green-400 text-sm';
-      banner.classList.add('hidden');
-    } else {
-      dot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
-      lbl.textContent = 'Kill Switch ON';
-      lbl.className = 'text-red-400 text-sm';
-      banner.classList.remove('hidden');
-    }
-  } catch (_) {}
+// ── BOARD (FIX 3: auto-refresh) ──────────────────────────────────────────────
+function startBoardAutoRefresh() {
+  if (window.boardRefreshInterval) clearInterval(window.boardRefreshInterval);
+  nextRefreshAt = Date.now() + BOARD_REFRESH_MS;
+  window.boardRefreshInterval = setInterval(function() {
+    refreshBoard();
+    nextRefreshAt = Date.now() + BOARD_REFRESH_MS;
+  }, BOARD_REFRESH_MS);
+  setInterval(function() {
+    const el = document.getElementById('next-refresh');
+    if (!el) return;
+    const secs = Math.max(0, Math.round((nextRefreshAt - Date.now()) / 1000));
+    el.textContent = 'next in ' + secs + 's';
+  }, 1000);
 }
 
-// ── BOARD ─────────────────────────────────────────────────────────────────────
 function renderBoard(jobs, leads) {
   const board = document.getElementById('board');
   const byCol = {};
@@ -258,7 +336,6 @@ function renderBoard(jobs, leads) {
     const div = document.createElement('div');
     div.className = 'board-col flex-none flex flex-col gap-2';
 
-    // Job cards
     let cardsHtml = colJobs.map(function(j) {
       const techName = j.confirmed_tech_name || j.current_tech_name || null;
       const tvs = j.num_tvs || countTvs(j);
@@ -279,7 +356,6 @@ function renderBoard(jobs, leads) {
       '</div>';
     }).join('');
 
-    // Lead cards — active leads in New column, dormant in Follow Up
     let leadCardsHtml = '';
     let totalCount = colJobs.length;
 
@@ -304,16 +380,13 @@ function renderBoard(jobs, leads) {
     if (col.key === 'new' && activeLeads.length > 0) {
       totalCount += activeLeads.length;
       leadCardsHtml = activeLeads.map(function(lead) {
-        const idx = allLeads.indexOf(lead);
-        return makeLeadCard(lead, idx);
+        return makeLeadCard(lead, allLeads.indexOf(lead));
       }).join('');
     }
-
     if (col.key === 'follow_up' && dormantLeads.length > 0) {
       totalCount += dormantLeads.length;
       leadCardsHtml = dormantLeads.map(function(lead) {
-        const idx = allLeads.indexOf(lead);
-        return makeLeadCard(lead, idx);
+        return makeLeadCard(lead, allLeads.indexOf(lead));
       }).join('');
     }
 
@@ -332,6 +405,7 @@ function renderBoard(jobs, leads) {
 
 // ── DETAIL PANEL — JOB ───────────────────────────────────────────────────────
 async function openPanel(jobId) {
+  stopSmsPolling();
   const job = allJobs.find(function(j) { return j.id === jobId; });
   if (!job) return;
   selectedJobId = jobId;
@@ -346,11 +420,13 @@ async function openPanel(jobId) {
   const phone = job.customer_phone;
   await loadSmsThreadByPhone(phone);
   loadAiSuggestion(job, phone);
+  loadTechsForPanel();
   if (phone) startSmsPolling(phone);
 }
 
 // ── DETAIL PANEL — LEAD ──────────────────────────────────────────────────────
 async function openLeadPanel(idx) {
+  stopSmsPolling();
   const lead = allLeads[idx];
   if (!lead) return;
   selectedJobId = null;
@@ -380,6 +456,42 @@ function statusBadge(status) {
   return '<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full text-white" style="background:' + color + '">' + escHtml(status) + '</span>';
 }
 
+// ── MANUAL SMS SECTION (FIX 5) ───────────────────────────────────────────────
+function renderManualSmsSend(phone) {
+  const safePhone = escHtml(phone || '');
+  return '<div class="mb-4 border border-gray-200 rounded-lg p-3">' +
+    '<div class="section-label">Send Manual SMS</div>' +
+    '<div class="flex gap-2">' +
+      '<input id="manual-sms-text" type="text" placeholder="Type message…" ' +
+        'class="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">' +
+      '<button onclick="sendManualSms(\'' + safePhone + '\')" ' +
+        'class="action-btn bg-indigo-600 text-white">Send</button>' +
+    '</div>' +
+  '</div>';
+}
+
+async function sendManualSms(phone) {
+  if (!phone) { showToast('No phone'); return; }
+  const inp = document.getElementById('manual-sms-text');
+  if (!inp) return;
+  const text = inp.value.trim();
+  if (!text) { showToast('Message is empty'); return; }
+  appendOptimisticMessage(text);
+  inp.value = '';
+  try {
+    await apiFetch('/admin/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Source': 'dashboard' },
+      body: JSON.stringify({ to: phone, message: text }),
+    });
+    showSuccess('✓ Sent');
+    await loadSmsThreadByPhone(phone);
+  } catch (e) {
+    showToast('Send failed: ' + e.message);
+  }
+}
+
+// ── LEAD PANEL ────────────────────────────────────────────────────────────────
 function renderLeadPanelShell(lead) {
   const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
   return '' +
@@ -392,12 +504,14 @@ function renderLeadPanelShell(lead) {
     '</div>' +
 
     '<div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-700">' +
-      'No job created yet — customer is mid-concierge flow.' +
+      'Customer is in concierge flow &mdash; no job created yet.' +
     '</div>' +
+
+    renderManualSmsSend(lead.phone) +
 
     '<div class="mb-3">' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">SMS Thread</h3>' +
-      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:280px;min-height:60px;">' +
+      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:240px;min-height:60px;">' +
         '<div class="text-gray-400 text-xs text-center py-3">Loading&hellip;</div>' +
       '</div>' +
     '</div>' +
@@ -405,53 +519,74 @@ function renderLeadPanelShell(lead) {
     '<div>' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">AI Suggested Reply</h3>' +
       '<div id="ai-section" class="flex items-center gap-2 text-gray-400 text-xs">' +
-        '<svg class="spin w-4 h-4 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>' +
-        'Generating suggestion&hellip;' +
+        spinnerSvg() + 'Generating suggestion&hellip;' +
       '</div>' +
     '</div>';
 }
 
-function buildActionsHtml(job) {
-  const id = escHtml(job.id);
-  const status = job.status;
+function spinnerSvg() {
+  return '<svg class="spin w-4 h-4 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+}
 
-  if (status === 'new' || status === 'scheduling' || status === 'scheduling_conflict') {
-    return '' +
-      '<button class="action-btn bg-indigo-50 text-indigo-700" style="border:1px solid #c7d2fe" onclick="patchJobStatus(\'' + id + '\',\'awaiting_time_confirm\')">Move → Time Confirm</button>' +
-      '<button class="action-btn bg-purple-50 text-purple-700" style="border:1px solid #e9d5ff" onclick="showReschedule(\'' + id + '\')">Reschedule</button>' +
-      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
-  }
-  if (status === 'awaiting_time_confirm') {
-    return '' +
-      '<button class="action-btn bg-amber-50 text-amber-700" style="border:1px solid #fde68a" onclick="patchJobStatus(\'' + id + '\',\'tech_search\')">Move → Tech Search</button>' +
-      '<button class="action-btn bg-purple-50 text-purple-700" style="border:1px solid #e9d5ff" onclick="showReschedule(\'' + id + '\')">Reschedule</button>' +
-      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
-  }
-  if (status === 'awaiting_payment') {
-    return '' +
-      '<button class="action-btn bg-green-600 text-white" onclick="resendPayment(\'' + id + '\')">Resend Payment Link</button>' +
-      '<button class="action-btn bg-green-50 text-green-700" style="border:1px solid #a7f3d0" onclick="markPaidManual(\'' + id + '\')">Mark as Paid (manual)</button>' +
-      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
-  }
-  if (status === 'tech_search' || status === 'awaiting_tech_reply') {
-    return '' +
-      '<button class="action-btn bg-amber-500 text-white" onclick="dispatchNextTech(\'' + id + '\')">Dispatch Next Tech</button>' +
-      '<button class="action-btn bg-amber-50 text-amber-700" style="border:1px solid #fde68a" onclick="showReassignTech(\'' + id + '\')">Reassign Tech</button>' +
-      '<button class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca" onclick="patchJobStatus(\'' + id + '\',\'cancelled\')">Cancel</button>';
-  }
-  if (status === 'confirmed') {
-    return '' +
-      '<button class="action-btn bg-blue-600 text-white" onclick="markCompleted(\'' + id + '\')">Mark Completed</button>' +
-      '<button class="action-btn bg-amber-50 text-amber-700" style="border:1px solid #fde68a" onclick="showReassignTech(\'' + id + '\')">Reassign Tech</button>' +
-      '<button class="action-btn bg-purple-50 text-purple-700" style="border:1px solid #e9d5ff" onclick="showReschedule(\'' + id + '\')">Reschedule</button>';
-  }
-  if (status === 'completed') {
-    return '<button class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb" onclick="reopenJob(\'' + id + '\')">Reopen Job</button>';
-  }
-  if (status === 'cancelled' || status === 'no_tech_available') {
-    return '<button class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb" onclick="reopenJob(\'' + id + '\')">Reopen Job</button>';
-  }
-  return '';
+// ── JOB PANEL ─────────────────────────────────────────────────────────────────
+function renderJobActionsSection(job) {
+  const id = escHtml(job.id);
+  const phone = escHtml(job.customer_phone || '');
+
+  // Status dropdown
+  const statusOpts = ALL_STATUSES.map(function(s) {
+    return '<option value="' + s + '"' + (s === job.status ? ' selected' : '') + '>' + s + '</option>';
+  }).join('');
+
+  return '<div class="mb-4 border border-gray-200 rounded-lg p-3 flex flex-col gap-3">' +
+    '<div class="section-label">Actions</div>' +
+
+    // Send Manual SMS
+    '<div>' +
+      '<div class="text-xs text-gray-500 mb-1">Send Manual SMS</div>' +
+      '<div class="flex gap-2">' +
+        '<input id="manual-sms-text" type="text" placeholder="Type message…" ' +
+          'class="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">' +
+        '<button onclick="sendManualSms(\'' + phone + '\')" class="action-btn bg-indigo-600 text-white">Send</button>' +
+      '</div>' +
+    '</div>' +
+
+    // Move status
+    '<div>' +
+      '<div class="text-xs text-gray-500 mb-1">Move to Status</div>' +
+      '<div class="flex gap-2">' +
+        '<select id="status-select" class="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm">' + statusOpts + '</select>' +
+        '<button onclick="moveToStatus(\'' + id + '\')" class="action-btn bg-slate-700 text-white">Move</button>' +
+      '</div>' +
+    '</div>' +
+
+    // Reschedule
+    '<div>' +
+      '<div class="text-xs text-gray-500 mb-1">Reschedule</div>' +
+      '<div class="flex gap-2">' +
+        '<input id="reschedule-input" type="datetime-local" class="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm">' +
+        '<button onclick="confirmReschedule(\'' + id + '\')" class="action-btn bg-purple-600 text-white">Set</button>' +
+      '</div>' +
+    '</div>' +
+
+    // Reassign tech (lazy load)
+    '<div>' +
+      '<div class="text-xs text-gray-500 mb-1">Reassign Tech</div>' +
+      '<div class="flex gap-2">' +
+        '<select id="reassign-select" class="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm"><option value="">Loading…</option></select>' +
+        '<button onclick="confirmReassign(\'' + id + '\')" class="action-btn bg-amber-500 text-white">Assign</button>' +
+      '</div>' +
+    '</div>' +
+
+    // Quick action buttons
+    '<div class="flex gap-2 flex-wrap">' +
+      '<button onclick="resendPayment(\'' + id + '\')" class="action-btn bg-green-600 text-white">Resend Payment</button>' +
+      '<button onclick="markPaidManual(\'' + id + '\')" class="action-btn bg-green-50 text-green-700" style="border:1px solid #a7f3d0">Mark Paid</button>' +
+      '<button onclick="markCompleted(\'' + id + '\')" class="action-btn bg-blue-600 text-white">Mark Completed</button>' +
+      '<button onclick="cancelJob(\'' + id + '\')" class="action-btn bg-red-50 text-red-600" style="border:1px solid #fecaca">Cancel Job</button>' +
+    '</div>' +
+
+  '</div>';
 }
 
 function renderPanelShell(job) {
@@ -478,8 +613,6 @@ function renderPanelShell(job) {
       '</div>';
   }
 
-  const actionsHtml = buildActionsHtml(job);
-
   return '' +
     '<div class="flex items-center justify-between mb-4">' +
       '<h2 class="font-bold text-gray-800 text-base">' + escHtml(job.customer_name || 'Unknown') + '</h2>' +
@@ -500,11 +633,11 @@ function renderPanelShell(job) {
       (tvBreakdown ? '<div class="border-t border-gray-200 pt-2">' + tvBreakdown + '</div>' : '') +
     '</div>' +
 
-    (actionsHtml ? '<div id="action-area" class="mb-4"><div class="flex gap-2 flex-wrap">' + actionsHtml + '</div><div id="action-extra" class="mt-3"></div></div>' : '') +
+    renderJobActionsSection(job) +
 
     '<div class="mb-3">' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">SMS Thread</h3>' +
-      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:280px;min-height:60px;">' +
+      '<div id="sms-thread" class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2 overflow-y-auto" style="max-height:240px;min-height:60px;">' +
         '<div class="text-gray-400 text-xs text-center py-3">Loading&hellip;</div>' +
       '</div>' +
     '</div>' +
@@ -512,12 +645,12 @@ function renderPanelShell(job) {
     '<div>' +
       '<h3 class="font-semibold text-gray-700 text-sm mb-2">AI Suggested Reply</h3>' +
       '<div id="ai-section" class="flex items-center gap-2 text-gray-400 text-xs">' +
-        '<svg class="spin w-4 h-4 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>' +
-        'Generating suggestion&hellip;' +
+        spinnerSvg() + 'Generating suggestion&hellip;' +
       '</div>' +
     '</div>';
 }
 
+// ── AI SUGGESTION (FIX 2) ────────────────────────────────────────────────────
 async function loadAiSuggestion(job, phone) {
   let msgs = [];
   if (phone) {
@@ -531,7 +664,13 @@ async function loadAiSuggestion(job, phone) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ job: job || null, messages: msgs }),
     });
-    renderAiSection(data.suggestion || '', phone);
+    const suggestion = data.suggestion || '';
+    if (!suggestion) {
+      const el = document.getElementById('ai-section');
+      if (el) el.innerHTML = '<div class="text-red-500 text-xs font-medium">AI suggestion returned empty — check Railway logs</div>';
+      return;
+    }
+    renderAiSection(suggestion, phone);
   } catch (e) {
     const el = document.getElementById('ai-section');
     if (el) el.innerHTML = '<div class="text-red-400 text-xs">Could not generate suggestion: ' + escHtml(e.message) + '</div>';
@@ -544,12 +683,31 @@ function renderAiSection(suggestion, phone) {
   const safePhone = escHtml(phone || '');
   el.innerHTML =
     '<div class="w-full">' +
-      '<textarea id="reply-text" class="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300" rows="4">' + escHtml(suggestion) + '</textarea>' +
+      // Draft preview bubble
+      '<div class="flex flex-col items-end mb-2">' +
+        '<div class="max-w-xs px-3 py-2 text-sm bubble-draft">' + escHtml(suggestion) + '</div>' +
+        '<span class="text-gray-400 text-xs mt-0.5 px-1">AI draft</span>' +
+      '</div>' +
+      '<textarea id="reply-text" oninput="updateSendBtn()" ' +
+        'class="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300" rows="3">' +
+        escHtml(suggestion) +
+      '</textarea>' +
       '<div class="flex items-center gap-3 mt-2">' +
-        '<button onclick="sendReplyToPhone(\'' + safePhone + '\')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg transition font-medium">Send</button>' +
+        '<button id="send-btn" onclick="sendReplyToPhone(\'' + safePhone + '\')" ' +
+          'class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-lg transition font-medium disabled:opacity-40 disabled:cursor-default">' +
+          'Send' +
+        '</button>' +
         '<span id="send-status" class="text-sm text-green-600 hidden">Sent &#10003;</span>' +
       '</div>' +
     '</div>';
+  updateSendBtn();
+}
+
+function updateSendBtn() {
+  const btn = document.getElementById('send-btn');
+  const ta = document.getElementById('reply-text');
+  if (!btn || !ta) return;
+  btn.disabled = !ta.value.trim();
 }
 
 async function sendReplyToPhone(phone) {
@@ -559,9 +717,9 @@ async function sendReplyToPhone(phone) {
   const text = textarea.value.trim();
   if (!text) { showToast('Message is empty'); return; }
 
-  // Optimistic append
   appendOptimisticMessage(text);
   textarea.value = '';
+  updateSendBtn();
 
   try {
     await apiFetch('/admin/send-sms', {
@@ -580,12 +738,7 @@ async function sendReplyToPhone(phone) {
   }
 }
 
-function focusReplyTextarea() {
-  const el = document.getElementById('reply-text');
-  if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
-}
-
-// ── ACTIONS ───────────────────────────────────────────────────────────────────
+// ── ACTIONS (FIX 5) ──────────────────────────────────────────────────────────
 async function patchJob(jobId, fields) {
   await apiFetch('/api/jobs/' + jobId, {
     method: 'PATCH',
@@ -594,127 +747,51 @@ async function patchJob(jobId, fields) {
   });
 }
 
-async function fetchAndRefreshPanel(jobId) {
-  const jobs = await apiFetch('/jobs?limit=300');
+async function afterAction(jobId) {
+  showSuccess('✓ Done');
+  const [jobs] = await Promise.all([
+    apiFetch('/jobs?limit=300'),
+    apiFetch('/api/leads').catch(function() { return []; }),
+  ]);
   allJobs = Array.isArray(jobs) ? jobs : allJobs;
-  const job = allJobs.find(function(j) { return j.id === jobId; });
-  if (job) document.getElementById('panel-content').innerHTML = renderPanelShell(job);
-}
-
-async function patchJobStatus(jobId, newStatus) {
-  try {
-    await patchJob(jobId, { status: newStatus });
-    showToast('Status updated to ' + newStatus);
-    clearActionExtra();
-    await refreshBoard();
-    await fetchAndRefreshPanel(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
+  const leads = await apiFetch('/api/leads').catch(function() { return allLeads; });
+  allLeads = Array.isArray(leads) ? leads : allLeads;
+  renderBoard(allJobs, allLeads);
+  if (jobId) {
+    const job = allJobs.find(function(j) { return j.id === jobId; });
+    if (job) {
+      const phone = job.customer_phone;
+      document.getElementById('panel-content').innerHTML = renderPanelShell(job);
+      if (phone) {
+        await loadSmsThreadByPhone(phone);
+        loadTechsForPanel();
+        startSmsPolling(phone);
+      }
+    }
   }
 }
 
-async function markCompleted(jobId) {
-  try {
-    await apiFetch('/jobs/' + jobId + '/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    showToast('Job marked completed');
-    closePanel();
-    await refreshBoard();
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
-}
-
-async function markPaidManual(jobId) {
-  try {
-    await patchJob(jobId, { paid_at: new Date().toISOString(), status: 'confirmed' });
-    showToast('Marked as paid');
-    await refreshBoard();
-    await fetchAndRefreshPanel(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
-}
-
-async function reopenJob(jobId) {
-  try {
-    await patchJob(jobId, { status: 'scheduling' });
-    showToast('Job reopened → Scheduling');
-    await refreshBoard();
-    await fetchAndRefreshPanel(jobId);
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
-}
-
-async function dispatchNextTech(jobId) {
-  try {
-    await apiFetch('/jobs/' + jobId + '/resend-tech-sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    showToast('Tech SMS dispatched');
-  } catch (e) {
-    showToast('Dispatch failed: ' + e.message);
-  }
-}
-
-async function resendPayment(jobId) {
-  try {
-    await patchJob(jobId, { status: 'awaiting_payment' });
-    showToast('Payment status reset — resend link via SMS');
-    focusReplyTextarea();
-  } catch (e) {
-    showToast('Error: ' + e.message);
-  }
-}
-
-function clearActionExtra() {
-  const el = document.getElementById('action-extra');
-  if (el) el.innerHTML = '';
-}
-
-async function showReassignTech(jobId) {
-  const el = document.getElementById('action-extra');
-  if (!el) return;
-  el.innerHTML = '<div class="text-xs text-gray-500 mb-1">Loading techs…</div>';
-  try {
-    const techs = await apiFetch('/jobs/techs/list');
-    const opts = techs.map(function(t) {
-      return '<option value="' + escHtml(t.id) + '">' + escHtml(t.name) + ' (' + escHtml(t.phone) + ')</option>';
-    }).join('');
-    el.innerHTML =
-      '<div class="flex items-center gap-2">' +
-        '<select id="reassign-select" class="border border-gray-200 rounded px-2 py-1.5 text-sm flex-1">' + opts + '</select>' +
-        '<button onclick="confirmReassign(\'' + escHtml(jobId) + '\')" class="action-btn bg-amber-500 text-white">Assign</button>' +
-        '<button onclick="clearActionExtra()" class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb">Cancel</button>' +
-      '</div>';
-  } catch (e) {
-    el.innerHTML = '<div class="text-red-400 text-xs">Failed to load techs: ' + escHtml(e.message) + '</div>';
-  }
-}
-
-async function confirmReassign(jobId) {
+async function loadTechsForPanel() {
   const sel = document.getElementById('reassign-select');
   if (!sel) return;
-  const techId = sel.value;
-  const techName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text.split(' (')[0] : '';
   try {
-    await patchJob(jobId, { confirmed_tech_id: techId, confirmed_tech_name: techName, status: 'awaiting_tech_reply' });
-    showToast('Tech reassigned to ' + techName);
-    clearActionExtra();
-    await refreshBoard();
-    await fetchAndRefreshPanel(jobId);
+    const techs = await apiFetch('/jobs/techs/list');
+    sel.innerHTML = techs.map(function(t) {
+      return '<option value="' + escHtml(t.id) + '">' + escHtml(t.name) + ' (' + escHtml(t.phone) + ')</option>';
+    }).join('');
+  } catch (_) {}
+}
+
+async function moveToStatus(jobId) {
+  const sel = document.getElementById('status-select');
+  if (!sel) return;
+  const newStatus = sel.value;
+  try {
+    await patchJob(jobId, { status: newStatus });
+    await afterAction(jobId);
   } catch (e) {
     showToast('Error: ' + e.message);
   }
-}
-
-function showReschedule(jobId) {
-  const el = document.getElementById('action-extra');
-  if (!el) return;
-  el.innerHTML =
-    '<div class="flex items-center gap-2">' +
-      '<input id="reschedule-input" type="datetime-local" class="border border-gray-200 rounded px-2 py-1.5 text-sm flex-1">' +
-      '<button onclick="confirmReschedule(\'' + escHtml(jobId) + '\')" class="action-btn bg-purple-600 text-white">Set Time</button>' +
-      '<button onclick="clearActionExtra()" class="action-btn bg-gray-100 text-gray-600" style="border:1px solid #e5e7eb">Cancel</button>' +
-    '</div>';
 }
 
 async function confirmReschedule(jobId) {
@@ -723,10 +800,60 @@ async function confirmReschedule(jobId) {
   const isoTime = new Date(input.value).toISOString();
   try {
     await patchJob(jobId, { preferred_time: isoTime, scheduled_time: isoTime, status: 'awaiting_time_confirm' });
-    showToast('Rescheduled');
-    clearActionExtra();
-    await refreshBoard();
-    await fetchAndRefreshPanel(jobId);
+    await afterAction(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+async function confirmReassign(jobId) {
+  const sel = document.getElementById('reassign-select');
+  if (!sel || !sel.value) { showToast('Select a tech'); return; }
+  const techId = sel.value;
+  const techName = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text.split(' (')[0] : '';
+  try {
+    await patchJob(jobId, { confirmed_tech_id: techId, confirmed_tech_name: techName, status: 'awaiting_tech_reply' });
+    await afterAction(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+async function resendPayment(jobId) {
+  try {
+    await apiFetch('/api/jobs/' + jobId + '/resend-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    showSuccess('✓ Payment link resent');
+  } catch (e) {
+    if (e.message.includes('404') || e.message.includes('Not Found')) {
+      showToast('not wired — send payment link manually via SMS');
+    } else {
+      showToast('Error: ' + e.message);
+    }
+  }
+}
+
+async function markPaidManual(jobId) {
+  try {
+    await patchJob(jobId, { paid_at: new Date().toISOString(), status: 'confirmed' });
+    await afterAction(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+async function markCompleted(jobId) {
+  try {
+    await apiFetch('/jobs/' + jobId + '/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    await afterAction(jobId);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+async function cancelJob(jobId) {
+  try {
+    await patchJob(jobId, { status: 'cancelled', cancelled_at: new Date().toISOString() });
+    await afterAction(jobId);
   } catch (e) {
     showToast('Error: ' + e.message);
   }
@@ -751,8 +878,11 @@ async function refreshBoard() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
-refreshBoard();
-setInterval(refreshBoard, 20000);
+refreshBoard().then(function() {
+  // Load techs into any open panel after board loads
+  loadTechsForPanel();
+});
+startBoardAutoRefresh();
 </script>
 </body>
 </html>
