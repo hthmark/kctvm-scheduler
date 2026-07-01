@@ -7,6 +7,56 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const ALLOWED_TABLES = new Set(['jobs', 'technicians', 'sms_conversations', 'prospects']);
 
+router.post('/dashboard/suggest-reply', async (req, res) => {
+  try {
+    const { job, messages } = req.body;
+    if (!job || !messages) return res.status(400).json({ error: 'job and messages required' });
+
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    const tvDetails = [];
+    for (let i = 1; i <= 10; i++) {
+      const size = job[`tv_${i}_size`];
+      if (!size || size === 'null' || size === 'undefined') continue;
+      const inches = job[`tv_${i}_inches`];
+      const mount = job[`tv_${i}_mount`];
+      const wall = job[`tv_${i}_wall`];
+      const wire = job[`tv_${i}_wire`];
+      tvDetails.push(`TV${i}: ${inches ? inches + '"' : size}, mount=${mount || '?'}, wall=${wall || 'drywall'}, wire=${wire === 'cable' ? 'concealment' : 'none'}`);
+    }
+
+    const systemPrompt = `You are the Hopscotch concierge — the friendly, professional SMS operator for Kansas City TV Mounting (KCTVM). You help customers schedule TV wall mounting appointments and answer their questions.
+
+Current job context:
+- Customer: ${job.customer_name || 'Unknown'}
+- City: ${job.customer_city || 'N/A'}
+- Status: ${job.status || 'N/A'}
+- Scheduled time: ${job.preferred_time || 'Not yet scheduled'}
+- Assigned tech: ${job.confirmed_tech_name || job.current_tech_name || 'Not yet assigned'}
+- Total price: ${job.total_price ? '$' + job.total_price : 'Not set'}
+- Number of TVs: ${job.num_tvs || 1}
+${tvDetails.length > 0 ? '- TV details:\n  ' + tvDetails.join('\n  ') : ''}
+
+Suggest a short, friendly, professional SMS reply to continue this conversation naturally. Keep it under 160 characters if possible. Reply ONLY with the suggested message text — no explanation, no quotes, no prefixes.`;
+
+    const history = messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: String(m.content) }));
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 300,
+      system: systemPrompt,
+      messages: history.length > 0 ? history : [{ role: 'user', content: 'Hello' }],
+    });
+
+    res.json({ suggestion: response.content[0]?.text || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const sbHeaders = {
   apikey: SUPABASE_KEY,
   Authorization: `Bearer ${SUPABASE_KEY}`,
