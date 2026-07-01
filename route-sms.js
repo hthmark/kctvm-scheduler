@@ -42,9 +42,11 @@ router.post('/inbound', async (req, res) => {
 
     // Always record inbound message before kill switch check
     if (body) {
-      await supabase.from('sms_conversations').insert({ phone: from, role: 'user', content: body }).catch(err =>
-        console.error('[SMS Inbound] Failed to record message:', err.message)
-      );
+      try {
+        await supabase.from('sms_conversations').insert({ phone: from, role: 'user', content: body });
+      } catch (err) {
+        console.error('[SMS Inbound] Failed to save message:', err);
+      }
     }
 
     if (!await isSystemEnabled()) {
