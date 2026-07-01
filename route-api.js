@@ -165,6 +165,31 @@ router.post('/system-status', async (req, res) => {
   }
 });
 
+router.post('/jobs/create-manual', async (req, res) => {
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    const { phone, name, city, preferred_time, num_tvs, total_price, tv_1_size, tv_1_mount, tv_1_wall, tv_1_wire } = req.body;
+    const { data, error } = await supabase.from('jobs').insert({
+      customer_phone: phone,
+      customer_name: name || phone,
+      city: city || 'Unknown',
+      preferred_time: preferred_time || null,
+      num_tvs: num_tvs || 1,
+      total_price: total_price || 0,
+      tv_1_size: tv_1_size || null,
+      tv_1_mount: tv_1_mount || null,
+      tv_1_wall: tv_1_wall || null,
+      tv_1_wire: tv_1_wire || null,
+      status: 'scheduling',
+    }).select('id').single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ id: data.id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.use('/:table', (req, res, next) => {
   if (!ALLOWED_TABLES.has(req.params.table)) return res.status(403).json({ error: 'Forbidden' });
   next();

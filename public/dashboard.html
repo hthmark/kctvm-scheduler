@@ -455,16 +455,21 @@ async function sendManualSms(phone) {
 // ── LEAD PANEL ───────────────────────────────────────────────────────────────
 function renderLeadPanelShell(lead) {
   const ago = lead.last_message_at ? timeAgo(lead.last_message_at) : '';
+  const safePhone = escHtml(lead.phone);
   return '' +
     '<div class="flex items-center justify-between mb-4">' +
       '<div>' +
-        '<h2 class="font-bold text-gray-800 text-base font-mono">' + escHtml(lead.phone) + '</h2>' +
+        '<h2 class="font-bold text-gray-800 text-base font-mono">' + safePhone + '</h2>' +
         '<span class="text-xs text-gray-400">Inbound lead &middot; ' + lead.message_count + ' messages &middot; ' + ago + '</span>' +
       '</div>' +
       '<button onclick="closePanel()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none w-8 h-8 flex items-center justify-center">&times;</button>' +
     '</div>' +
     '<div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-700">' +
       'Customer is in concierge flow &mdash; no job created yet.' +
+    '</div>' +
+    '<div class="mb-4 border border-gray-200 rounded-lg p-3 flex flex-col gap-2">' +
+      '<div class="section-label">Actions</div>' +
+      '<button onclick="moveLeadToScheduling(\'' + safePhone + '\')" class="action-btn bg-purple-600 text-white w-full">Move to Scheduling</button>' +
     '</div>' +
     renderManualSmsSend(lead.phone) +
     '<div class="mb-3">' +
@@ -758,6 +763,39 @@ async function markCompleted(jobId) {
 async function cancelJob(jobId) {
   try { await patchJob(jobId, { status: 'cancelled', cancelled_at: new Date().toISOString() }); await afterAction(jobId); }
   catch (e) { showToast('Error: ' + e.message); }
+}
+
+// ── LEAD → SCHEDULING ────────────────────────────────────────────────────────
+async function moveLeadToScheduling(phone) {
+  try {
+    const data = await apiFetch('/api/jobs/create-manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: phone,
+        name: phone,
+        city: 'Unknown',
+        preferred_time: null,
+        num_tvs: 1,
+        total_price: 0,
+        tv_1_size: null,
+        tv_1_mount: null,
+        tv_1_wall: null,
+        tv_1_wire: null,
+      }),
+    });
+    showSuccess('Job created — moved to Scheduling');
+    const [jobs, leads] = await Promise.all([
+      apiFetch('/jobs?limit=300'),
+      apiFetch('/api/leads').catch(function() { return allLeads; }),
+    ]);
+    allJobs = Array.isArray(jobs) ? jobs : allJobs;
+    allLeads = Array.isArray(leads) ? leads : allLeads;
+    renderBoard(allJobs, allLeads);
+    if (data.id) openPanel(data.id);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
 }
 
 // ── REFRESH ───────────────────────────────────────────────────────────────────

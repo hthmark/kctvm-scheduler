@@ -35,6 +35,13 @@ app.post('/admin/send-sms', async (req, res) => {
   const { sendSMS } = require('./service-sms');
   const result = await sendSMS(to, message);
   if (result.success === false && !result.blocked) return res.status(500).json({ error: result.error || 'Send failed' });
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+    await supabase.from('sms_conversations').insert({ phone: to, role: 'assistant', content: message });
+  } catch (err) {
+    console.error('[admin/send-sms] Failed to save outbound message:', err);
+  }
   res.json({ ok: true });
 });
 
